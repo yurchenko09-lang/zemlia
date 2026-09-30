@@ -1,14 +1,14 @@
 import * as st from "./store.js";
-
+ 
 const CFG = { secPerMcq: 60, secOpen: 180, draftEvery: 30000, readSaveEvery: 90000 };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 const toTop = () => window.scrollTo(0, 0);
 const params = new URLSearchParams(location.search);
-
+ 
 let COURSE, SETTINGS, T = null, A = null, AID = null, UID = null;
 let S = { phase:"", readStart:0, qStart:0, blur:0, tid:null, did:null, rid:null };
-
+ 
 // ---------- збереження з локальною копією і повтором при відсутності зв'язку
 const local = {
   get(id){ try { return JSON.parse(localStorage.getItem("att:"+id)); } catch(e){ return null; } },
@@ -26,10 +26,10 @@ async function save(){
   }
 }
 window.addEventListener("online", ()=>{ if(pending) save(); });
-
+ 
 function warn(m){ const a=$("alert"); a.innerHTML=m; a.classList.add("show"); }
 function unwarn(){ $("alert").classList.remove("show"); }
-
+ 
 // ---------- карта курсу
 function courseMap(activeId){
   const open = SETTINGS.topics || {};
@@ -52,7 +52,7 @@ function bar(label){
   return `<div class="bar"><div class="in"><span>${label}</span><div class="pbar"><i style="width:${p}%"></i></div><span>${d}/${T.blocks.length}</span></div></div>`;
 }
 const blk = i => (A.blocks[i] ||= { readSec:0, reachedEnd:false, variant:0, interrupts:0, blur:0 });
-
+ 
 // ---------- екрани
 function renderHome(){
   $("app").innerHTML = `<div class="card"><div class="hint">Ключове питання курсу</div><div class="tq">${esc(COURSE.question)}</div>
@@ -209,13 +209,14 @@ function renderDone(already){
     ${pending?'<p class="bad">Зв\'язку зараз немає — не закривайте сторінку, поки не зникне повідомлення внизу.</p>':""}
     <div class="row"><span class="sp"></span><a class="mb" href="./">До карти курсу</a></div></div>`;
 }
-
-
+ 
+ 
 // ---------- ігри: кросворд і кодове слово
 const LAT = {A:"А",B:"В",C:"С",E:"Е",H:"Н",I:"І",K:"К",M:"М",O:"О",P:"Р",T:"Т",X:"Х",Y:"У"};
 function norm(s){ return String(s||"").toUpperCase().replace(/[A-Z]/g, c=>LAT[c]||c).replace(/Ґ/g,"Г").replace(/[^А-ЯІЇЄЬ]/g,""); }
 async function sha(s){ const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join(""); }
 let CX = null;
+const bukv = n => { const d=n%10, h=n%100; return (d===1&&h!==11)?"буква":(d>=2&&d<=4&&(h<12||h>14))?"букви":"букв"; };
 function renderCross(){
   S.phase="game"; A.phase="cross"; const X = T.cross[A.crossV||0]; const C = (A.cross ||= { cells:{}, ok:[], checks:0, sec:0 }); S.gStart=Date.now();
   const cells = {}; X.entries.forEach((e,ei)=>{ for(let i=0;i<e.len;i++){ const r=e.r+(e.d==="V"?i:0), c=e.c+(e.d==="H"?i:0); (cells[r+"_"+c] ||= {ents:[]}).ents.push(ei); if(i===0) cells[r+"_"+c].num=e.n; } });
@@ -224,7 +225,7 @@ function renderCross(){
   for (let r=0;r<X.h;r++) for (let c=0;c<X.w;c++){ const k=r+"_"+c, cell=cells[k];
     g += cell ? `<div class="cc">${cell.num?`<span class="cn">${cell.num}</span>`:""}<input maxlength="1" data-k="${k}" value="${esc(C.cells[k]||"")}" autocomplete="off"></div>` : `<div class="ce"></div>`; }
   g += `</div>`;
-  const list = d => X.entries.map((e,ei)=>({e,ei})).filter(x=>x.e.d===d).sort((a,b)=>a.e.n-b.e.n).map(({e,ei})=>`<li id="cl${ei}" class="${C.ok.includes(ei)?"ok":""}"><b>${e.n}.</b> ${esc(e.clue)} <span class="hint">(${e.len})</span></li>`).join("");
+  const list = d => X.entries.map((e,ei)=>({e,ei})).filter(x=>x.e.d===d).sort((a,b)=>a.e.n-b.e.n).map(({e,ei})=>`<li id="cl${ei}" class="${C.ok.includes(ei)?"ok":""}"><b>${e.n}.</b> ${esc(e.clue)} <span class="hint">(${e.len} ${bukv(e.len)})</span></li>`).join("");
   $("app").innerHTML = bar("Гра: кросворд") + `<div class="card">
     <h2 style="margin-top:0;font-size:18px">Кросворд за темою <span class="badge">гра</span></h2>
     <p class="hint">Згадайте терміни з усієї теми. Натисніть «Перевірити» — правильні слова стануть зеленими. Можна перевіряти кілька разів.</p>
@@ -277,7 +278,7 @@ async function wordNext(){
   if (a && a!==W.answer){ W.answer=a; W.tries++; W.ok = (await sha(T.id+":word:"+a)) === T.game.hashes[A.wordV||0]; }
   A.wordDone=true; A.phase="final"; await save(); renderFinal();
 }
-
+ 
 // ---------- дії та захист
 const ACT = {
   login, read: renderRead, openModal: ()=>$("modal").classList.add("show"), closeModal: ()=>$("modal").classList.remove("show"),
@@ -303,7 +304,7 @@ window.addEventListener("blur", away);
 document.addEventListener("contextmenu", e => e.preventDefault());
 ["copy","cut","dragstart"].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
 ["paste","drop"].forEach(ev => document.addEventListener(ev, e => { if(S.phase==="quiz") e.preventDefault(); }));
-
+ 
 // ---------- старт
 (async function(){
   if (st.DEMO) $("demo").innerHTML = '<span class="demo">Демо-режим: Firebase ще не підключено, дані зберігаються лише в цьому браузері</span>';
@@ -318,3 +319,4 @@ document.addEventListener("contextmenu", e => e.preventDefault());
   try { T = await fetch(`topics/${tid}/topic.json`).then(r=>r.json()); } catch(e){ $("app").innerHTML = `<div class="card bad">Тему не знайдено.</div>`; return; }
   renderLogin();
 })();
+ 
