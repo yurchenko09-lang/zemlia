@@ -53,7 +53,7 @@ async function loadTopic(id){
 }
 function score(T, K, a){
   if (!K) return null; let ok=0, n=0;
-  T.blocks.forEach((B,i)=>{ const b=(a.blocks||{})[i]; if(!b||!b.picks) return; const k=K[i][b.variant||0]; b.picks.forEach((p,qi)=>{ n++; if(p===k[qi]) ok++; }); });
+  T.blocks.forEach((B,i)=>{ const b=(a.blocks||{})[i]; if(!b||!b.picks) return; const k=K.keys[i][b.variant||0]; b.picks.forEach((p,qi)=>{ n++; if(p===k[qi]) ok++; }); });
   return { ok, n };
 }
 function stats(T, a){
@@ -63,7 +63,7 @@ function stats(T, a){
   const blur = bl.reduce((s,b)=>s+(b.blur||0),0) + (a.finalBlur||0);
   const intr = bl.reduce((s,b)=>s+(b.interrupts||0),0);
   const notEnd = bl.filter(b => b.picks && !b.reachedEnd).length;
-  const gems = T.game ? bl.filter(b=>b.picks && b.letter && b.letter===(T.blocks[b.i].gems||[])[a.wordV||0]).length : null;
+  const G = KEYS[SEL.topic] && KEYS[SEL.topic].gems; const gems = G ? bl.filter(b=>b.picks && b.letter && b.letter===G[b.i][a.wordV||0]).length : null;
   const cx = T.cross && a.cross ? `${a.cross.ok.length}/${T.cross[a.crossV||0].entries.length}` : "—";
   const word = a.word ? (a.word.ok ? "✓" : (a.word.answer ? "✗" : "—")) : "—";
   return { read, fast, blur, intr, notEnd, subm: bl.filter(b=>b.picks).length, gems, cx, word };
@@ -101,10 +101,10 @@ function detail(id){
     <button class="sm" style="background:var(--warn)" data-act="reset" data-v="${esc(id)}">Скинути спробу</button></div>
     <h3>${esc(a.name)} · ${esc(a.group)}</h3>
     <p class="hint">Почав: ${a.startedAt?new Date(a.startedAt).toLocaleString("uk-UA"):""} · Сеансів: ${a.sessions||1} · ${a.done?'Завершив: '+new Date(a.finishedAt).toLocaleString("uk-UA"):'не завершено'}</p>
-    ${T.blocks.map((B,i)=>{ const b=(a.blocks||{})[i]; if(!b) return ""; const V=B.variants[b.variant||0]; const k=K?K[i][b.variant||0]:null;
+    ${T.blocks.map((B,i)=>{ const b=(a.blocks||{})[i]; if(!b) return ""; const V=B.variants[b.variant||0]; const k=K?K.keys[i][b.variant||0]:null;
       return `<h4 style="margin:18px 0 4px">${i+1}. ${esc(B.title)} ${b.variant?'<span class="badge">запасні питання</span>':''}</h4>
       <p class="hint">Читав ${fmt(b.readSec)} (норма ≈ ${fmt(B.words/2.5)})${b.readSec<B.words/FAST_WPS&&b.picks?' <span class="bad">дуже швидко</span>':''}${b.reachedEnd?'':' <span class="bad">не догортав</span>'}
-       · буква: ${b.letter?esc(b.letter):'—'}${T.game?((b.letter===(B.gems||[])[a.wordV||0])?' <span class="ok">✓</span>':` <span class="bad">✗ (${esc((B.gems||[])[a.wordV||0])})</span>`):''}
+       · буква: ${b.letter?esc(b.letter):'—'}${K&&K.gems?((b.letter===K.gems[i][a.wordV||0])?' <span class="ok">✓</span>':` <span class="bad">✗ (${esc(K.gems[i][a.wordV||0])})</span>`):''}
        · відповідав ${fmt(b.quizSec)}${b.auto?' (час вичерпано)':''} · виходи: ${b.blur||0} · перерви: ${b.interrupts||0}</p>
       ${b.picks?`<table class="rep">${V.mcq.map((m,qi)=>{ const p=b.picks[qi]; const ok=k?p===k[qi]:null;
         return `<tr><td>${esc(m.q)}</td><td>${p>=0?esc(m.o[p]):'<span class="bad">— без відповіді —</span>'}${k&&!ok?`<br><span class="hint">Правильно: ${esc(m.o[k[qi]])}</span>`:''}</td><td class="${ok?'ok':ok===false?'bad':''}">${ok?'✓':ok===false?'✗':''}</td></tr>`; }).join("")}
@@ -118,7 +118,7 @@ function exportJson(){
   const T=TOPICS[SEL.topic], K=KEYS[SEL.topic];
   const out = { course:COURSE.title, topic:`Тема ${T.num}. ${T.title}`, exported:new Date().toISOString(), group:SEL.group||"усі",
     students: filtered().map(a=>({ name:a.name, group:a.group, done:!!a.done,
-      blocks: T.blocks.map((B,i)=>{ const b=(a.blocks||{})[i]; if(!b||!b.picks) return null; const V=B.variants[b.variant||0], k=K?K[i][b.variant||0]:null;
+      blocks: T.blocks.map((B,i)=>{ const b=(a.blocks||{})[i]; if(!b||!b.picks) return null; const V=B.variants[b.variant||0], k=K?K.keys[i][b.variant||0]:null;
         return { block:`${i+1}. ${B.title}`, lecture_summary:B.sum, readSec:b.readSec, fast:b.readSec<B.words/FAST_WPS, reachedEnd:!!b.reachedEnd, blur:b.blur||0, interrupts:b.interrupts||0, reserve:!!b.variant,
           tests: V.mcq.map((m,qi)=>({ q:m.q, answer:b.picks[qi]>=0?m.o[b.picks[qi]]:null, correct:k?b.picks[qi]===k[qi]:null })),
           open:{ q:V.open, answer:b.open||"" } }; }).filter(Boolean),
@@ -145,7 +145,7 @@ function renderKeys(){
   document.querySelectorAll(".kf").forEach(inp=>inp.onchange=async e=>{
     const id=e.target.dataset.t; try { const k=JSON.parse(await e.target.files[0].text());
       if(k.topic!==id || !Array.isArray(k.keys)) throw new Error("Це файл ключів для іншої теми");
-      await st.saveKeys(id,k); KEYS[id]=k.keys; warn("Ключі збережено"); renderKeys(); } catch(err){ warn(esc(err.message||err)); } });
+      await st.saveKeys(id,k); KEYS[id]={keys:k.keys, gems:k.gems||null}; warn("Ключі збережено"); renderKeys(); } catch(err){ warn(esc(err.message||err)); } });
 }
 // ---------- дії
 const ACT = {

@@ -48,8 +48,8 @@ function topicMap(cur){
   }</div></div>`).join('<div class="down">↓</div>')}</div>`;
 }
 function bar(label){
-  const p = Math.round(100*A.cur/T.blocks.length);
-  return `<div class="bar"><div class="in"><span>${label}</span><div class="pbar"><i style="width:${p}%"></i></div><span>${A.cur}/${T.blocks.length}</span></div></div>`;
+  const d = Math.min(T.blocks.length, A.cur + (S.phase==="bridge"?1:0)), p = Math.round(100*d/T.blocks.length);
+  return `<div class="bar"><div class="in"><span>${label}</span><div class="pbar"><i style="width:${p}%"></i></div><span>${d}/${T.blocks.length}</span></div></div>`;
 }
 const blk = i => (A.blocks[i] ||= { readSec:0, reachedEnd:false, variant:0, interrupts:0, blur:0 });
 
@@ -117,8 +117,7 @@ function renderIntro(){
   const note = A.resumeNote ? `<div class="info">Ви перервалися під час відповідей на питання цього блоку. Прочитайте блок ще раз — питання будуть <b>інші</b>.</div>` : (b.readSec>0 ? `<div class="info">Продовжуємо з блоку ${A.cur+1}.</div>` : "");
   A.resumeNote = false;
   $("app").innerHTML = bar("Блок "+(A.cur+1)) + `<div class="card">${note}
-    <div class="hint">Ключове питання теми</div><div class="tq">${esc(T.question)}</div>
-    ${topicMap(A.cur)}
+    ${A.cur===0?`<div class="hint">Ключове питання теми</div><div class="tq">${esc(T.question)}</div>${topicMap(0)}`:`<details class="mapd"><summary>Карта теми</summary>${topicMap(A.cur)}</details>`}
     <div class="keyq"><div class="hint">Ключове питання блоку ${A.cur+1}</div><b>${esc(B.key)}</b></div>
     <p class="hint" style="margin:10px 0 0">${esc(B.frm)}</p>
     <div class="row" style="margin-top:16px"><span class="hint">≈ ${Math.max(1,Math.round(B.words/150))} хв читання</span><span class="sp"></span><button data-act="read">Почати читання</button></div></div>`;
@@ -135,7 +134,7 @@ function renderRead(){
     <div class="lec">${B.html}</div>
     <div class="wm">${esc(A.name)} · ${esc(A.group)}</div>
     <div class="endbox" id="endbox"><div class="row"><span class="hint">Готові? Питання будуть без доступу до тексту.</span><span class="sp"></span><button data-act="openModal">Прочитав — до питань</button></div></div></div>`;
-  document.querySelectorAll(".lec .gem").forEach(g => { g.innerHTML = "✦ "+esc((B.gems||[])[A.wordV||0]||""); g.title="Запам'ятайте цю букву"; });
+  document.querySelectorAll(".lec .gem").forEach(g => { g.textContent = (B.riddles||[])[A.wordV||0]||""; });
   document.querySelectorAll(".lec img[data-src]").forEach(i => { i.src = `topics/${T.id}/${i.dataset.src}`; i.parentElement.dataset.act="zoom"; });
   const ob = new IntersectionObserver(e => { if(e[0].isIntersecting){ blk(A.cur).reachedEnd=true; ob.disconnect(); } }); ob.observe($("endbox"));
   clearInterval(S.rid); S.rid = setInterval(()=>{ flushRead(); save(); }, CFG.readSaveEvery);
@@ -151,7 +150,7 @@ function renderQuiz(){
     <div class="row"><h2 style="margin:0;font-size:18px">Блок ${A.cur+1}. ${esc(B.title)}: питання</h2><span class="sp"></span><span class="timer" id="tmr"></span></div>
     <p class="hint">Тексту блоку більше не видно. Відповідайте з пам'яті.</p>
     ${V.mcq.map((m,qi)=>`<div class="q"><h3>${qi+1}. ${esc(m.q)}</h3>${m.o.map((o,oi)=>`<label class="opt"><input type="radio" name="q${qi}" value="${oi}"><span>${esc(o)}</span></label>`).join("")}</div>`).join("")}
-    ${T.game?`<div class="q"><h3>✦ Буква, яку ви знайшли в тексті цього блоку <span class="badge">гра</span></h3><input type="text" id="gemA" maxlength="1" autocomplete="off" style="width:70px;text-align:center;font-size:22px;text-transform:uppercase"></div>`:""}
+    ${T.game?`<div class="q"><h3>✦ Буква для гри з цього блоку <span class="badge">гра</span></h3><p class="hint" style="margin:-4px 0 8px">Її загадка була в тексті. Якщо не пам'ятаєте — залиште порожнім.</p><input type="text" id="gemA" maxlength="1" autocomplete="off" style="width:70px;text-align:center;font-size:22px;text-transform:uppercase"></div>`:""}
     <div class="q"><h3>${V.mcq.length+1}. ${esc(V.open)}<span class="badge">відкрите, перевіряє викладач</span></h3>
       <textarea id="openA" placeholder="Ваша відповідь…"></textarea><div class="hint" id="cnt">0 слів</div></div>
     <div class="row"><span class="sp"></span><button data-act="submit">Надіслати відповіді блоку</button></div></div>`;
@@ -180,8 +179,9 @@ function renderBridge(){
     <p class="ok" style="margin:0 0 8px">✓ Відповіді збережено</p>
     <div class="keyq"><div class="hint">Відповідь на ключове питання: ${esc(B.key)}</div>${esc(B.sum)}</div>
     <p style="margin:14px 0 0"><b>Що далі і навіщо:</b> ${esc(B.nxt)}</p>
-    ${topicMap(A.cur+1)}
-    <div class="row" style="margin-top:16px"><span class="hint">Можна зробити перерву — прогрес збережено.</span><span class="sp"></span><button data-act="next">${last?"До підсумкового завдання":"До блоку "+(A.cur+2)}</button></div></div>`;
+    ${last?"":`<div class="keyq"><div class="hint">Блок ${A.cur+2}. ${esc(T.blocks[A.cur+1].title)} · ≈ ${Math.max(1,Math.round(T.blocks[A.cur+1].words/150))} хв</div><b>${esc(T.blocks[A.cur+1].key)}</b></div>`}
+    <details class="mapd"><summary>Карта теми</summary>${topicMap(A.cur+1)}</details>
+    <div class="row" style="margin-top:16px"><span class="hint">Можна зробити перерву — прогрес збережено.</span><span class="sp"></span><button data-act="next">${last?"До підсумкового завдання":"Читати блок "+(A.cur+2)}</button></div></div>`;
   toTop();
 }
 function renderFinal(){
@@ -282,7 +282,7 @@ async function wordNext(){
 const ACT = {
   login, read: renderRead, openModal: ()=>$("modal").classList.add("show"), closeModal: ()=>$("modal").classList.remove("show"),
   toQuiz: renderQuiz, submit: ()=>submit(false), finish,
-  next: ()=>{ A.cur++; A.phase = A.cur<T.blocks.length ? "intro" : "cross"; save(); route(); },
+  next: ()=>{ A.cur++; if (A.cur<T.blocks.length) renderRead(); else { A.phase="cross"; save(); route(); } },
   crossCheck: ()=>crossCheck(false), crossNext: ()=>crossCheck(true), wordCheck, wordNext,
   zoom: el => { $("lbimg").src = el.querySelector("img").src; $("lb").classList.add("show"); }
 };

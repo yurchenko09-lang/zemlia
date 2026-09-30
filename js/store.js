@@ -75,10 +75,10 @@ export async function deleteAttempt(id){
   const f = await F(); await f.fs.deleteDoc(f.fs.doc(f.D,"attempts",id));
 }
 export async function getKeys(topic){
-  if (DEMO) { const k=LS.get("keys:"+topic); return k? k.keys : null; }
-  const f = await F(); const s = await f.fs.getDoc(f.fs.doc(f.D,"keys",topic)); return s.exists()? JSON.parse(s.data().keys): null;
+  if (DEMO) { const k=LS.get("keys:"+topic); return k? { keys:k.keys, gems:k.gems||null } : null; }
+  const f = await F(); const s = await f.fs.getDoc(f.fs.doc(f.D,"keys",topic)); if(!s.exists()) return null; const d=JSON.parse(s.data().keys); return Array.isArray(d)? {keys:d, gems:null} : d;
 }
 export async function saveKeys(topic, k){
   if (DEMO) { LS.set("keys:"+topic, k); return; }
-  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"keys",topic), { keys: JSON.stringify(k.keys) });
+  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"keys",topic), { keys: JSON.stringify({ keys:k.keys, gems:k.gems||null }) });
 }

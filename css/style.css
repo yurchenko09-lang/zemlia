@@ -63,7 +63,8 @@ table.rep th{background:#f1f5ec}
 .big{font-size:28px;font-weight:700}
 @media (max-width:600px){.card{padding:14px}.lec{font-size:17px}button{width:100%}button.sm{width:auto}}
 /* гра */
-.gem{display:inline-block;background:#fff3cd;border:1px solid #e9cf7a;color:#6b5200;border-radius:6px;padding:0 6px;margin:0 3px;font-weight:700}
+.gem{font-style:italic;color:inherit}
+.mapd{margin-top:12px}.mapd summary{cursor:pointer;color:var(--mut);font-size:14px}
 .gemrow{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
 .gemrow span{width:36px;height:42px;display:flex;align-items:center;justify-content:center;border:2px solid var(--acc2);border-radius:8px;font-size:22px;font-weight:700;background:#fbfcf9}
 .gemrow span.miss{border-style:dashed;color:var(--mut)}

@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{db}/documents {
     function isTeacher() {
       // ЗАМІНІТЬ на свою пошту (ту саму, що в js/firebase-config.js)
-      return request.auth != null && request.auth.token.email == "ВАША_ПОШТА@gmail.com";
+      return request.auth != null && request.auth.token.email == "yurchenko09@gmail.com";
     }
     // Налаштування (групи, відкриті теми, дедлайни): читають усі, змінює лише викладач
     match /config/{doc} {
