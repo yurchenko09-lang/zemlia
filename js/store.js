@@ -29,6 +29,7 @@ export function attemptId(topic, group, name){
 export async function studentInit(){
   if (DEMO) return "demo-uid";
   const f = await F();
+  await f.A.authStateReady();
   if (!f.A.currentUser) await f.auth.signInAnonymously(f.A);
   return f.A.currentUser.uid;
 }
@@ -49,9 +50,16 @@ export async function saveAttempt(id, data){
   const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"attempts",id), JSON.parse(JSON.stringify(data)));
 }
 // ---- викладач
+export async function teacherCurrent(){
+  if (DEMO) return { email:"demo" };
+  const f = await F(); await f.A.authStateReady();
+  const u = f.A.currentUser;
+  return (u && !u.isAnonymous && u.email === TEACHER_EMAIL) ? u : null;
+}
 export async function teacherSignIn(){
   if (DEMO) return { email:"demo" };
   const f = await F(); const p = new f.auth.GoogleAuthProvider();
+  await f.auth.setPersistence(f.A, f.auth.browserLocalPersistence);
   const r = await f.auth.signInWithPopup(f.A, p);
   if (r.user.email !== TEACHER_EMAIL) throw new Error("Ця пошта не має прав викладача: "+r.user.email);
   return r.user;
@@ -81,4 +89,12 @@ export async function getKeys(topic){
 export async function saveKeys(topic, k){
   if (DEMO) { LS.set("keys:"+topic, k); return; }
   const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"keys",topic), { keys: JSON.stringify({ keys:k.keys, gems:k.gems||null }) });
+}
+
+// ---- завантаження теми (основний шлях topics/tXX/, запасний — tXX/ у корені репозиторію)
+export async function loadTopic(id){
+  for (const base of [`topics/${id}/`, `${id}/`]) {
+    try { const r = await fetch(base + "topic.json", { cache: "no-cache" }); if (r.ok) { const t = await r.json(); t.__base = base; return t; } } catch(e){}
+  }
+  throw new Error("Тему не знайдено: " + id);
 }

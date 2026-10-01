@@ -1,14 +1,14 @@
 import * as st from "./store.js";
- 
+
 const CFG = { secPerMcq: 60, secOpen: 180, draftEvery: 30000, readSaveEvery: 90000 };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 const toTop = () => window.scrollTo(0, 0);
 const params = new URLSearchParams(location.search);
- 
+
 let COURSE, SETTINGS, T = null, A = null, AID = null, UID = null;
 let S = { phase:"", readStart:0, qStart:0, blur:0, tid:null, did:null, rid:null };
- 
+
 // ---------- збереження з локальною копією і повтором при відсутності зв'язку
 const local = {
   get(id){ try { return JSON.parse(localStorage.getItem("att:"+id)); } catch(e){ return null; } },
@@ -26,10 +26,10 @@ async function save(){
   }
 }
 window.addEventListener("online", ()=>{ if(pending) save(); });
- 
+
 function warn(m){ const a=$("alert"); a.innerHTML=m; a.classList.add("show"); }
 function unwarn(){ $("alert").classList.remove("show"); }
- 
+
 // ---------- карта курсу
 function courseMap(activeId){
   const open = SETTINGS.topics || {};
@@ -52,7 +52,7 @@ function bar(label){
   return `<div class="bar"><div class="in"><span>${label}</span><div class="pbar"><i style="width:${p}%"></i></div><span>${d}/${T.blocks.length}</span></div></div>`;
 }
 const blk = i => (A.blocks[i] ||= { readSec:0, reachedEnd:false, variant:0, interrupts:0, blur:0 });
- 
+
 // ---------- екрани
 function renderHome(){
   $("app").innerHTML = `<div class="card"><div class="hint">Ключове питання курсу</div><div class="tq">${esc(COURSE.question)}</div>
@@ -135,7 +135,7 @@ function renderRead(){
     <div class="wm">${esc(A.name)} · ${esc(A.group)}</div>
     <div class="endbox" id="endbox"><div class="row"><span class="hint">Готові? Питання будуть без доступу до тексту.</span><span class="sp"></span><button data-act="openModal">Прочитав — до питань</button></div></div></div>`;
   document.querySelectorAll(".lec .gem").forEach(g => { g.textContent = (B.riddles||[])[A.wordV||0]||""; });
-  document.querySelectorAll(".lec img[data-src]").forEach(i => { i.src = `topics/${T.id}/${i.dataset.src}`; i.parentElement.dataset.act="zoom"; });
+  document.querySelectorAll(".lec img[data-src]").forEach(i => { i.src = `${T.__base}${i.dataset.src}`; i.parentElement.dataset.act="zoom"; });
   const ob = new IntersectionObserver(e => { if(e[0].isIntersecting){ blk(A.cur).reachedEnd=true; ob.disconnect(); } }); ob.observe($("endbox"));
   clearInterval(S.rid); S.rid = setInterval(()=>{ flushRead(); save(); }, CFG.readSaveEvery);
   toTop();
@@ -209,8 +209,8 @@ function renderDone(already){
     ${pending?'<p class="bad">Зв\'язку зараз немає — не закривайте сторінку, поки не зникне повідомлення внизу.</p>':""}
     <div class="row"><span class="sp"></span><a class="mb" href="./">До карти курсу</a></div></div>`;
 }
- 
- 
+
+
 // ---------- ігри: кросворд і кодове слово
 const LAT = {A:"А",B:"В",C:"С",E:"Е",H:"Н",I:"І",K:"К",M:"М",O:"О",P:"Р",T:"Т",X:"Х",Y:"У"};
 function norm(s){ return String(s||"").toUpperCase().replace(/[A-Z]/g, c=>LAT[c]||c).replace(/Ґ/g,"Г").replace(/[^А-ЯІЇЄЬ]/g,""); }
@@ -278,7 +278,7 @@ async function wordNext(){
   if (a && a!==W.answer){ W.answer=a; W.tries++; W.ok = (await sha(T.id+":word:"+a)) === T.game.hashes[A.wordV||0]; }
   A.wordDone=true; A.phase="final"; await save(); renderFinal();
 }
- 
+
 // ---------- дії та захист
 const ACT = {
   login, read: renderRead, openModal: ()=>$("modal").classList.add("show"), closeModal: ()=>$("modal").classList.remove("show"),
@@ -304,7 +304,7 @@ window.addEventListener("blur", away);
 document.addEventListener("contextmenu", e => e.preventDefault());
 ["copy","cut","dragstart"].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
 ["paste","drop"].forEach(ev => document.addEventListener(ev, e => { if(S.phase==="quiz") e.preventDefault(); }));
- 
+
 // ---------- старт
 (async function(){
   if (st.DEMO) $("demo").innerHTML = '<span class="demo">Демо-режим: Firebase ще не підключено, дані зберігаються лише в цьому браузері</span>';
@@ -316,7 +316,6 @@ document.addEventListener("contextmenu", e => e.preventDefault());
   const cfg = (SETTINGS.topics||{})[tid];
   if (!cfg || !cfg.open){ $("app").innerHTML = `<div class="card"><h2 style="margin-top:0">Тема зараз закрита</h2><p class="hint">Її відкриє викладач.</p><a class="mb" href="./">До карти курсу</a></div>`; return; }
   if (cfg.deadline && new Date(cfg.deadline) < new Date()){ $("app").innerHTML = `<div class="card"><h2 style="margin-top:0">Термін проходження теми минув</h2><p class="hint">Зверніться до викладача.</p></div>`; return; }
-  try { T = await fetch(`topics/${tid}/topic.json`).then(r=>r.json()); } catch(e){ $("app").innerHTML = `<div class="card bad">Тему не знайдено.</div>`; return; }
+  try { T = await st.loadTopic(tid); } catch(e){ $("app").innerHTML = `<div class="card bad">Тему не знайдено.</div>`; return; }
   renderLogin();
 })();
- 

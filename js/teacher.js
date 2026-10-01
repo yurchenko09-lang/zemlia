@@ -11,8 +11,15 @@ const studentLink = id => new URL(`index.html?t=${id}`, location.href).href;
 
 async function start(){
   if (st.DEMO) $("demo").innerHTML = '<span class="demo">Демо-режим: Firebase ще не підключено</span>';
-  try { const u = await st.teacherSignIn(); $("who").textContent = u.email; }
-  catch(e){ warn(esc(e.message||e)); return; }
+  let u = null;
+  try { u = await st.teacherCurrent(); } catch(e){ warn(esc(e.message||e)); }
+  if (!u){
+    $("app").innerHTML = `<div class="card"><h3 style="margin-top:0">Вхід викладача</h3><p class="hint">Увійдіть один раз — браузер запам'ятає вхід.</p><button class="mb" id="gin">Увійти через Google</button></div>`;
+    await new Promise(res => { $("gin").onclick = async () => {
+      try { u = await st.teacherSignIn(); res(); } catch(e){ warn(esc(e.message||e)); }
+    }; });
+  }
+  $("who").textContent = u.email;
   COURSE = await fetch("course.json").then(r=>r.json());
   SETTINGS = await st.getSettings(); SETTINGS.groups ||= []; SETTINGS.topics ||= {};
   allTopics().forEach(t => READY[t.id] = !!t.ready);
@@ -47,7 +54,7 @@ async function saveTopic(id){
 }
 // ---------- результати
 async function loadTopic(id){
-  if (!TOPICS[id]) TOPICS[id] = await fetch(`topics/${id}/topic.json`).then(r=>r.json());
+  if (!TOPICS[id]) TOPICS[id] = await st.loadTopic(id);
   if (KEYS[id] === undefined) KEYS[id] = await st.getKeys(id);
   ROWS = await st.listAttempts(id);
 }
