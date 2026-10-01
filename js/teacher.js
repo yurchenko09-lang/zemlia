@@ -164,4 +164,4 @@ const ACT = {
   exportJson, exportCsv
 };
 document.addEventListener("click", e=>{ const b=e.target.closest("[data-act]"); if(!b) return; e.preventDefault(); ACT[b.dataset.act](b); });
-if (st.DEMO) start();
+start();
