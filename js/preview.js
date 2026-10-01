@@ -30,7 +30,7 @@ function render(){
   let h = `<div class="card"><p><b>Головне питання:</b> ${esc(T.question)}</p><ul>${map}</ul><div class="toc noprint">${toc}</div></div>`;
   T.blocks.forEach((b,i)=>{
     let html = b.html.replace(/<span class="gem"><\/span>/g, `<span class="gem">[тут загадка для гри]</span>`)
-                     .replace(/data-src="([^"]+)"/g, (m,s)=>`src="${T.__base}${s}"`);
+                     .replace(/<img data-src="([^"]+)"([^>]*)><figcaption>/g, (m,src,rest)=>`<img src="${T.__base}${src}"${rest}><figcaption><span class="pv-tag">файл: ${T.__base}${src}</span> `);
     const vars = (b.variants||[]).map((v,vi)=>`<div class="pv-box"><h4 style="margin:0 0 6px">${vi===0?"Основний варіант":"Резервний варіант"}</h4>${qs(v.mcq, K && K.keys[i] && K.keys[i][vi])}<p><b>Відкрите:</b> ${esc(v.open)}</p></div>`).join("");
     const rid = (b.riddles||[]).map((r,wi)=>`<div class="pv-r"><span class="pv-tag">слово ${wi+1}${K&&K.gems?` · ${esc(K.gems[i][wi])}`:""}</span>${esc(r.replace(/^✦ Буква для гри — /,""))}</div>`).join("");
     h += `<div class="card pv-b" id="b${i}"><p class="hint">Блок ${i+1} з ${T.blocks.length} · ≈${esc(b.words)} слів</p><h2 style="margin-top:0">${esc(b.title)}</h2>
