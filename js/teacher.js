@@ -43,7 +43,7 @@ function renderAccess(){
       ${r?`<div class="row" style="margin-top:8px"><label class="chk"><input type="checkbox" class="op" ${c.open?'checked':''}> Відкрита</label>
         <span class="hint">Дедлайн:</span><input type="datetime-local" class="dl" value="${esc(c.deadline||'')}" style="width:auto"></div>
         <div>${G.map(g=>`<label class="chk"><input type="checkbox" class="gr" value="${esc(g)}" ${(c.groups||[]).includes(g)?'checked':''}> ${esc(g)}</label>`).join("") || '<span class="hint">Спершу додайте групи</span>'}</div>
-        <div class="row" style="margin-top:6px"><code>${esc(studentLink(t.id))}</code><button class="sm sec" data-act="copy" data-v="${esc(studentLink(t.id))}">Копіювати</button><span class="sp"></span><button class="sm" data-act="saveTopic" data-v="${t.id}">Зберегти</button></div>`:''}</div>`;
+        <div class="row" style="margin-top:6px"><code>${esc(studentLink(t.id))}</code><button class="sm sec" data-act="copy" data-v="${esc(studentLink(t.id))}">Копіювати</button> <a class="sm sec" style="padding:6px 10px;border-radius:8px;background:#e7ebe2;text-decoration:none;color:inherit" href="preview.html?t=${t.id}" target="_blank">Переглянути</a><span class="sp"></span><button class="sm" data-act="saveTopic" data-v="${t.id}">Зберегти</button></div>`:''}</div>`;
     }).join("")}`).join("")}</div>`;
 }
 async function saveGroups(){ SETTINGS.groups = $("groups").value.split("\n").map(s=>s.trim()).filter(Boolean); await st.saveSettings(SETTINGS); warn("Групи збережено"); render(); }
