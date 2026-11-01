@@ -15,7 +15,7 @@ let COURSE, SETTINGS, TAB = "setup", ROWS = [], SEL = { topic: "", group: "", id
 let warnT = null;
 function warn(m){ const a=$("alert"); a.innerHTML=m; a.classList.add("show"); clearTimeout(warnT); warnT = setTimeout(()=>a.classList.remove("show"), 8000); }
 // повідомлення в картці співбесіди, біля кнопки «Зберегти» (видно, навіть коли сторінку прокручено вниз)
-function boxMsg(id, m, bad = true){ const el = document.querySelector(`.tp[data-t="${id}"] .boxmsg`); if (el) { el.className = "boxmsg " + (bad ? "bad" : "ok"); el.textContent = m; } else warn(m); }
+function boxMsg(id, m, bad = true){ const els = document.querySelectorAll(`.tp[data-t="${id}"] .boxmsg`); if (!els.length) { warn(m); return; } els.forEach(el => { el.className = "boxmsg " + (bad ? "bad" : "ok"); el.textContent = m; }); }
 const allTopics = () => COURSE.sections.flatMap(s => s.topics);
 const readyTopics = () => allTopics().filter(t => t.ready);
 const link = id => new URL(`interview.html?i=${id}`, location.href).href;
@@ -59,7 +59,9 @@ function formOf(box){
   };
 }
 const cmpKeys = ["title","topics","open","nq","minutes","showScore","groups","criteria"];
-const pick = o => JSON.stringify(cmpKeys.map(k => o ? o[k] : null));
+const norm = o => o ? { title: o.title || "", topics: o.topics || [], open: !!o.open, nq: o.nq || 6, minutes: o.minutes ?? 20, showScore: !!o.showScore, groups: o.groups || [],
+  criteria: (o.criteria && o.criteria.length ? o.criteria : DEFAULT_CRITERIA).map(c => ({ name: c.name, desc: c.desc || "", max: Number(c.max) })) } : null;
+const pick = o => { const n = norm(o); return JSON.stringify(cmpKeys.map(k => n ? n[k] : null)); };
 // стан збереженої співбесіди (для огляду і плашки)
 function stateOf(id){
   const s = SAVED[id];
@@ -97,7 +99,7 @@ async function loadCounts(){
     try { const rows = await st.listAttempts("ai-" + id); ATT[id] = { done: rows.filter(r => r.done).length, prog: rows.filter(r => !r.done).length }; }
     catch(e){ ATT[id] = null; }
   }));
-  if (TAB === "setup") { interviews().forEach(([id]) => paintStatus(id)); paintOverview(); }
+  if (TAB === "setup") { interviews().forEach(([id]) => { paintStatus(id); applyLock(id); }); paintOverview(); }
 }
 function paintOverview(){
   const el = $("overview"); if (!el) return;
@@ -120,7 +122,15 @@ function renderSetup(){
     ${list.map(([id, c]) => {
       const crit = c.criteria && c.criteria.length ? c.criteria : DEFAULT_CRITERIA;
       const sum = crit.reduce((s,x)=>s+Number(x.max||0),0);
-      return `<div class="tp" data-t="${id}"><div class="ivstat"></div>
+      const sv = SAVED[id] && !SAVED[id].unsaved;
+      return `<div class="tp" data-t="${id}">
+        <div class="row" style="margin-bottom:6px"><h3 style="margin:0">${esc(c.title || "Нова співбесіда")}</h3><span class="sp"></span>
+          ${sv ? `<button class="sm ${c.open ? "sec" : ""}" data-act="toggleOpen" data-v="${id}">${c.open ? "Закрити співбесіду" : "Відкрити співбесіду"}</button>
+          <button class="sm sec" data-act="dup" data-v="${id}" title="Нова співбесіда з тими самими налаштуваннями">Копія</button>` : ""}</div>
+        <div class="ivstat"></div>
+        <div class="row">${c.unsaved ? '<span class="hint">Посилання з\'явиться після збереження</span>' : `<code>${esc(link(id))}</code><button class="sm sec" data-act="copy" data-v="${esc(link(id))}">Копіювати</button>`}<span class="sp"></span><span class="boxmsg"></span></div>
+        <details class="ivform" data-f="${id}" ${!sv || EDIT.has(id) ? "open" : ""}><summary>Налаштування співбесіди</summary>
+        <div class="lockmsg"></div>
         <label>Назва</label><input type="text" class="ti" value="${esc(c.title||"")}" placeholder="Напр., Тематична: Літосфера і ґрунти (теми 9–12)">
         <label>Теми</label>
         <div>${COURSE.sections.map(sec => { const ts = sec.topics.filter(t => t.ready); return ts.length ? `<div class="hint" style="margin-top:6px">${esc(sec.title)}</div>${ts.map(t =>
@@ -136,12 +146,26 @@ function renderSetup(){
           <table class="rep crit" style="margin-top:6px"><thead><tr><th>Критерій</th><th>Що оцінюється</th><th>Макс</th><th></th></tr></thead><tbody>${critRows(crit)}</tbody></table>
           <div class="row" style="margin-top:6px"><button class="sm sec" data-act="addCrit">+ критерій</button><button class="sm sec" data-act="resetCrit">Стандартні</button></div>
         </details>
-        <div class="row" style="margin-top:8px">${c.unsaved ? '<span class="hint">Посилання з\'явиться після збереження</span>' : `<code>${esc(link(id))}</code><button class="sm sec" data-act="copy" data-v="${esc(link(id))}">Копіювати</button>`}<span class="sp"></span><span class="boxmsg"></span>
-          <button class="sm sec" data-act="delIv" data-v="${id}">Видалити</button><button class="sm" data-act="save" data-v="${id}">Зберегти</button></div>
+        <div class="row" style="margin-top:8px"><button class="sm sec" data-act="delIv" data-v="${id}">Видалити</button><span class="sp"></span><span class="boxmsg"></span>
+          <button class="sm" data-act="save" data-v="${id}">Зберегти</button></div>
+        </details>
       </div>`;
     }).join("")}</div>`;
-  interviews().forEach(([id]) => paintStatus(id)); paintOverview(); loadCounts();
+  interviews().forEach(([id]) => { paintStatus(id); applyLock(id); }); paintOverview(); loadCounts();
+  document.querySelectorAll("details.ivform").forEach(d => d.addEventListener("toggle", () => { d.open ? EDIT.add(d.dataset.f) : EDIT.delete(d.dataset.f); }));
 }
+// Коли співбесіду вже хтось проходить, зміст (теми, кількість питань, критерії) змінювати не можна:
+// інакше студенти отримають різні питання й оцінюватимуться за різними правилами.
+// Можна: відкрити/закрити, групи, час, показ балу. Для іншого змісту — «Копія».
+const isLocked = id => { const a = ATT[id]; return !!(SAVED[id] && !SAVED[id].unsaved && a && (a.done + a.prog) > 0); };
+function applyLock(id){
+  const box = document.querySelector(`.tp[data-t="${id}"]`); if (!box) return;
+  const lock = isLocked(id);
+  box.querySelectorAll(".tc, .nq, .crit input, [data-act=addCrit], [data-act=resetCrit], [data-act=delCrit]").forEach(el => el.disabled = lock);
+  const a = ATT[id];
+  box.querySelector(".lockmsg").innerHTML = lock ? `<div class="info">🔒 Співбесіду вже проходили (${a.done} завершили, ${a.prog} в процесі), тому <b>теми, кількість питань і критерії заблоковано</b> — інакше студенти отримали б різні питання й оцінювалися б за різними правилами. Змінювати можна групи, час, показ балу, відкриття/закриття. Щоб змінити зміст — натисніть «Копія» і налаштуйте нову співбесіду.</div>` : "";
+}
+let EDIT = new Set();
 async function newInterview(){
   const id = "s" + Date.now().toString(36);
   SETTINGS.ai[id] = { title: "", topics: [], open: false, nq: 6, minutes: 20, showScore: false, groups: [], criteria: DEFAULT_CRITERIA, created: Date.now(), unsaved: true };
@@ -168,6 +192,22 @@ async function saveTopic(id){
   SETTINGS.ai[id] = { title, topics, open: box.querySelector(".op").checked, nq, minutes: mn, showScore: box.querySelector(".ss").checked,
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value), criteria: crit, created: (SETTINGS.ai[id] && SETTINGS.ai[id].created) || Date.now() };
   await st.saveSettings(SETTINGS); snap(); render(); boxMsg(id, "Збережено ✓ Зміни діють приблизно за 30 секунд.", false);
+}
+async function toggleOpen(id){
+  const c = SETTINGS.ai[id]; if (!c) return;
+  if (!c.open) {
+    const miss = []; if (!c.title) miss.push("назву"); if (!(c.topics||[]).length) miss.push("теми"); if (!(c.groups||[]).length) miss.push("групи");
+    if (miss.length) { EDIT.add(id); render(); boxMsg(id, "Щоб відкрити, вкажіть " + miss.join(", ") + " і збережіть."); return; }
+  } else if (ATT[id] && ATT[id].prog && !confirm(`Зараз ${ATT[id].prog} студ. посеред співбесіди. Після закриття вони не зможуть продовжити. Закрити?`)) return;
+  c.open = !c.open; delete c.unsaved;
+  await st.saveSettings(SETTINGS); snap(); render();
+  warn(c.open ? "Співбесіду відкрито" : "Співбесіду закрито");
+}
+function duplicate(id){
+  const c = SAVED[id] || SETTINGS.ai[id], nid = "s" + Date.now().toString(36);
+  SETTINGS.ai[nid] = { ...JSON.parse(JSON.stringify(c)), title: (c.title || "") + " (копія)", open: false, created: Date.now(), unsaved: true };
+  EDIT.add(nid); render();
+  document.querySelector(`.tp[data-t="${nid}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 async function deleteInterview(id){
   const c = SETTINGS.ai[id] || {};
@@ -328,6 +368,8 @@ document.addEventListener("click", async ev => {
     else if (act === "save") await saveTopic(v);
     else if (act === "copy") { await navigator.clipboard.writeText(v); warn("Посилання скопійовано"); }
     else if (act === "new") await newInterview();
+    else if (act === "toggleOpen") await toggleOpen(v);
+    else if (act === "dup") duplicate(v);
     else if (act === "goto") document.querySelector(`.tp[data-t="${v}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
     else if (act === "delIv") await deleteInterview(v);
     else if (act === "addCrit") el.closest(".tp").querySelector(".crit tbody").insertAdjacentHTML("beforeend", critRows([{ name: "", desc: "", max: 2 }]));
