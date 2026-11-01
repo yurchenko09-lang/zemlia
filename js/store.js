@@ -98,3 +98,56 @@ export async function loadTopic(id){
   }
   throw new Error("Тему не знайдено: " + id);
 }
+
+// ---- списки студентів
+// Повний список лежить у keys/roster (читає лише викладач). У публічних налаштуваннях — тільки
+// rosterH: для кожного студента хеш прізвища і ПІБ, зашифроване ключем із прізвища. Тож список
+// не можна прочитати, але, знаючи прізвище, сайт перевіряє ім'я і може підказати правильне написання.
+const ENC = new TextEncoder(), DEC = new TextDecoder();
+export const normPart = s => String(s||"").toLowerCase().replace(/[’'`ʼ‘´-]/g,"").replace(/ё/g,"е").replace(/\s+/g," ").trim().replace(/[^a-zа-яіїєґ0-9 ]/gi,"");
+const normFull = s => normPart(s).split(" ").filter(Boolean).sort().join(" ");
+const b64 = u => btoa(String.fromCharCode(...new Uint8Array(u)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function sha(str){ return new Uint8Array(await crypto.subtle.digest("SHA-256", ENC.encode(str))); }
+async function surHash(group, sur){ return [...(await sha("zemlia-s|" + normPart(group) + "|" + normPart(sur)))].slice(0,12).map(x=>x.toString(16).padStart(2,"0")).join(""); }
+async function surKey(group, sur){ return crypto.subtle.importKey("raw", await sha("zemlia-k|" + normPart(group) + "|" + normPart(sur)), "AES-GCM", false, ["encrypt","decrypt"]); }
+export async function rosterEntry(group, name){
+  const sur = name.split(" ")[0], iv = crypto.getRandomValues(new Uint8Array(12));
+  const c = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await surKey(group, sur), ENC.encode(name));
+  return { s: await surHash(group, sur), iv: b64(iv), c: b64(c) };
+}
+export async function buildRosterH(roster){
+  const out = {};
+  for (const [g, list] of Object.entries(roster || {})) out[g] = await Promise.all(list.map(n => rosterEntry(g, n)));
+  return out;
+}
+export function hasRosterFor(settings, group){ const r = (settings && settings.rosterH || {})[group]; return Array.isArray(r) && r.length > 0; }
+// → { status: "ok", name } | { status: "hint", names } | { status: "none" } | { status: "noroster" }
+export async function matchName(settings, group, typed){
+  if (!hasRosterFor(settings, group)) return { status: "noroster" };
+  const list = settings.rosterH[group], w = normPart(typed).split(" ").filter(Boolean);
+  const cands = [...new Set([w[0], w[w.length-1], w.length > 2 ? w[0] + w[1] : null].filter(Boolean))];
+  const found = [];
+  for (const sur of cands) {
+    const h = await surHash(group, sur), hits = list.filter(e => e.s === h);
+    if (!hits.length) continue;
+    const key = await surKey(group, sur);
+    for (const e of hits) { try { found.push(DEC.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(e.iv) }, key, unb64(e.c)))); } catch(err){} }
+  }
+  const exact = found.find(n => normFull(n) === normFull(typed));
+  if (exact) return { status: "ok", name: exact };
+  if (found.length) return { status: "hint", names: [...new Set(found)] };
+  return { status: "none" };
+}
+export const isUkrainian = s => !/[a-z]/i.test(s) && !/[ыэъё]/i.test(s) && /[а-яіїєґ]/i.test(s);
+export async function getRoster(){
+  if (DEMO) return LS.get("roster") || {};
+  const f = await F(); const d = await f.fs.getDoc(f.fs.doc(f.D,"keys","roster"));
+  return d.exists() ? JSON.parse(d.data().data || "{}") : {};
+}
+export async function saveRoster(roster){
+  if (DEMO) { LS.set("roster", roster); return; }
+  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"keys","roster"), { data: JSON.stringify(roster) });
+}
+// поле ПІБ — завжди звичайне текстове (список студентам не показуємо)
+export function nameField(){ return `<input type="text" id="nm" placeholder="Прізвище та ім'я, напр. Коваленко Олена" autocomplete="name">`; }

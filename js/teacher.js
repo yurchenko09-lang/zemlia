@@ -22,12 +22,14 @@ async function start(){
   $("who").textContent = u.email;
   COURSE = await fetch("course.json").then(r=>r.json());
   SETTINGS = await st.getSettings(); SETTINGS.groups ||= []; SETTINGS.topics ||= {};
+  try { ROSTER = await st.getRoster(); } catch(e){ ROSTER = {}; }
+  if (SETTINGS.roster && !Object.keys(ROSTER).length) ROSTER = SETTINGS.roster;   // перенесення зі старого формату
   allTopics().forEach(t => READY[t.id] = !!t.ready);
   render();
 }
-function tabs(){ return `<div class="tabs">${[["access","Теми і доступ"],["results","Результати"],["keys","Ключі відповідей"]].map(([k,l])=>`<button class="${TAB===k?'on':''}" data-act="tab" data-v="${k}">${l}</button>`).join("")}</div>`; }
+function tabs(){ return `<div class="tabs">${[["access","Теми і доступ"],["students","Студенти"],["results","Результати"],["keys","Ключі відповідей"]].map(([k,l])=>`<button class="${TAB===k?'on':''}" data-act="tab" data-v="${k}">${l}</button>`).join("")}</div>`; }
 function render(){
-  if (TAB==="access") renderAccess(); else if (TAB==="results") renderResults(); else renderKeys();
+  if (TAB==="access") renderAccess(); else if (TAB==="students") renderStudents(); else if (TAB==="results") renderResults(); else renderKeys();
 }
 // ---------- доступ
 function renderAccess(){
@@ -141,6 +143,119 @@ function exportCsv(){
   filtered().forEach(a=>{ const s=stats(T,a), sc=score(T,K,a); lines.push([a.group,a.name,a.done?"так":"ні",s.subm,sc?sc.ok:"",sc?sc.n:"",Math.round(s.read/60),s.fast,s.blur,s.intr,s.gems??"",s.word,s.cx].map(q).join(";")); });
   download(`${SEL.topic}_${SEL.group||"all"}.csv`, "﻿"+lines.join("\n"), "text/csv");
 }
+// ---------- списки студентів
+let IMPORT = null, ROSTER = {};
+async function persistRoster(){
+  await st.saveRoster(ROSTER);
+  SETTINGS.rosterH = await st.buildRosterH(ROSTER); delete SETTINGS.roster;
+  await st.saveSettings(SETTINGS);
+}
+const fixApos = s => s.replace(/[’ʼ`´‘]/g, "'");
+const capWord = w => w.split("-").map(p => p ? p[0].toLocaleUpperCase("uk") + p.slice(1).toLocaleLowerCase("uk") : p).join("-");
+function cleanPart(x){
+  x = fixApos(String(x||"").replace(/\s+/g," ").trim());
+  // ВЕЛИКИМИ або маленькими літерами → з великої
+  return x.split(" ").map(w => (w === w.toLocaleUpperCase("uk") || w === w.toLocaleLowerCase("uk")) && /[a-zа-яіїєґ]/i.test(w) ? capWord(w) : w).join(" ");
+}
+const normName = n => st.attemptId("", "", n);   // та сама нормалізація, що й для ідентифікатора спроби
+function mapGroup(code){
+  const G = SETTINGS.groups;
+  if (G.includes(code)) return { name: code, how: "exists" };
+  const hits = G.filter(g => (g.match(/[0-9]+[-\s]?[a-zа-яіїєґ]*/gi) || []).map(t => t.replace(/[-\s]/g,"").toLowerCase()).includes(code.replace(/[-\s]/g,"").toLowerCase()));
+  if (hits.length === 1) return { name: hits[0], how: "mapped" };
+  return { name: code, how: "new" };
+}
+function parseRoster(text){
+  const groups = {}, problems = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (!line.trim()) return;
+    let p = line.split(/\t|;/).map(x => x.trim());
+    if (p.length < 4) p = line.trim().split(/\s+/);
+    if (p.length < 3) { problems.push(`Рядок ${i+1}: не вдалося розібрати «${line.trim()}»`); return; }
+    let code, num, sur, first;
+    if (/^\d+$/.test(p[1]) && p.length >= 4) { [code, num, sur] = p; first = p.slice(3).join(" "); }
+    else { code = p[0]; num = ""; sur = p[1]; first = p.slice(2).join(" "); }
+    code = code.trim();
+    if (/^(група|group)$/i.test(code)) return;                 // заголовок таблиці
+    sur = cleanPart(sur); first = cleanPart(first);
+    if (!code || !sur || !first) { problems.push(`Рядок ${i+1}: бракує групи, прізвища чи імені`); return; }
+    (groups[code] ||= []).push({ num: num ? Number(num) : null, name: `${sur} ${first}`, line: i+1 });
+  });
+  const result = Object.entries(groups).map(([code, list]) => {
+    const warn = [], seen = new Map(), nums = new Map(), names = [];
+    list.forEach(r => {
+      const k = normName(r.name);
+      if (seen.has(k)) { warn.push(`дубль «${r.name}» (рядки ${seen.get(k)} і ${r.line}) — пропущено`); return; }
+      seen.set(k, r.line);
+      if (r.num != null) { if (nums.has(r.num)) warn.push(`номер ${r.num} повторюється (рядки ${nums.get(r.num)} і ${r.line})`); nums.set(r.num, r.line); }
+      names.push(r);
+    });
+    const ns = [...nums.keys()].sort((a,b)=>a-b);
+    if (ns.length) { const miss = []; for (let n = 1; n <= ns[ns.length-1]; n++) if (!nums.has(n)) miss.push(n); if (miss.length) warn.push(`пропущено номери: ${miss.join(", ")}`); }
+    if (names.every(r => r.num != null)) names.sort((a,b) => a.num - b.num);
+    const g = mapGroup(code);
+    const old = ROSTER[g.name] || [];
+    const oldK = new Set(old.map(normName)), newK = new Set(names.map(r => normName(r.name)));
+    return { code, group: g.name, how: g.how, names: names.map(r => r.name), warn,
+      added: names.filter(r => !oldK.has(normName(r.name))).map(r => r.name), removed: old.filter(n => !newK.has(normName(n))) };
+  });
+  // одне ПІБ у кількох групах
+  const where = {};
+  result.forEach(g => g.names.forEach(n => (where[normName(n)] ||= { n, gs: [] }).gs.push(g.group)));
+  Object.entries(ROSTER).forEach(([g, list]) => { if (result.some(r => r.group === g)) return; list.forEach(n => { const w = where[normName(n)]; if (w) w.gs.push(g); }); });
+  Object.values(where).filter(w => w.gs.length > 1).forEach(w => problems.push(`«${w.n}» є в кількох групах: ${w.gs.join(", ")} — перевірте`));
+  return { groups: result, problems };
+}
+function renderStudents(){
+  const R = ROSTER, gs = Object.keys(R).sort((a,b)=>a.localeCompare(b,"uk",{numeric:true}));
+  $("app").innerHTML = tabs() + `<div class="card"><h3 style="margin-top:0">Завантажити списки</h3>
+    <p class="hint">Скопіюйте з Excel стовпці <b>Група · № · Прізвище · Ім'я</b> (можна одразу кілька груп) і вставте сюди. Студенти, як і раніше, вводять ПІБ самі, а сайт звіряє його зі списком: точний збіг — проходять (у тому числі «Ім\'я Прізвище»), збіглося лише прізвище — сайт підкаже правильне написання, немає збігу — просить ввести ПІБ українською. Сам список студенти не бачать. Список групи при повторному завантаженні <b>замінюється</b> повністю.</p>
+    <textarea id="rosterIn" style="min-height:160px;font-family:ui-monospace,monospace;font-size:14px" placeholder="101	1	Бабакова	Анастасія"></textarea>
+    <div class="row" style="margin-top:8px"><span class="sp"></span><button class="sec" data-act="rosterCheck">Перевірити</button></div>
+    <div id="rosterPrev"></div></div>
+    <div class="card"><h3 style="margin-top:0">Поточні списки</h3>
+    ${gs.length ? gs.map(g => `<details class="tp" data-g="${esc(g)}"><summary><b>${esc(g)}</b> — ${R[g].length} студ.</summary>
+      <p class="hint">Один студент у рядку: «Прізвище Ім'я».</p><textarea class="rl" style="min-height:200px">${esc(R[g].join("\n"))}</textarea>
+      <div class="row" style="margin-top:6px"><button class="sm sec" data-act="rosterDel" data-v="${esc(g)}">Видалити список</button><span class="sp"></span><button class="sm" data-act="rosterSave" data-v="${esc(g)}">Зберегти</button></div></details>`).join("")
+      : '<p class="hint">Списків ще немає. Поки списку групи немає, ПІБ студентів цієї групи не перевіряється.</p>'}</div>`;
+}
+function rosterCheck(){
+  IMPORT = parseRoster($("rosterIn").value);
+  const { groups, problems } = IMPORT;
+  if (!groups.length) { $("rosterPrev").innerHTML = `<p class="bad">Не знайдено жодного студента.</p>${problems.map(p=>`<div class="hint">${esc(p)}</div>`).join("")}`; return; }
+  $("rosterPrev").innerHTML = `<h4>Перевірка</h4>
+    ${problems.length ? `<div class="alert show">${problems.map(esc).join("<br>")}</div>` : ""}
+    <table class="rep"><tr><th>Група</th><th>Студентів</th><th>Зміни</th><th>Зауваження</th></tr>
+    ${groups.map(g => `<tr><td><b>${esc(g.group)}</b><br><span class="hint">${g.how==="new" ? "нова група — буде додана" : g.how==="mapped" ? `«${esc(g.code)}» → наявна група` : "наявна група"}</span></td>
+      <td>${g.names.length}</td>
+      <td>${!ROSTER[g.group] ? '<span class="hint">новий список</span>' : (g.added.length || g.removed.length) ?
+        `${g.added.length ? `<span class="ok">+ ${g.added.map(esc).join(", ")}</span><br>` : ""}${g.removed.length ? `<span class="bad">− ${g.removed.map(esc).join(", ")}</span>` : ""}` : '<span class="hint">без змін</span>'}</td>
+      <td>${g.warn.length ? g.warn.map(w=>`<div class="bad" style="font-weight:400">${esc(w)}</div>`).join("") : '<span class="ok">✓</span>'}</td></tr>`).join("")}</table>
+    <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Показати, як будуть записані імена</summary>
+      ${groups.map(g => `<p><b>${esc(g.group)}:</b> ${g.names.map(esc).join(", ")}</p>`).join("")}</details>
+    <div class="row" style="margin-top:10px"><span class="sp"></span><button data-act="rosterApply">Зберегти ${groups.length > 1 ? `списки (${groups.length} групи)` : "список"}</button></div>`;
+}
+async function rosterApply(){
+  if (!IMPORT) return;
+  const rem = IMPORT.groups.reduce((s,g) => s + g.removed.length, 0);
+  if (rem && !confirm(`Із наявних списків буде видалено студентів: ${rem}. Їхні результати залишаться. Продовжити?`)) return;
+  IMPORT.groups.forEach(g => { ROSTER[g.group] = g.names; if (!SETTINGS.groups.includes(g.group)) SETTINGS.groups.push(g.group); });
+  await persistRoster(); IMPORT = null; warn("Списки збережено"); renderStudents();
+}
+async function rosterSave(g){
+  const box = document.querySelector(`details[data-g="${CSS.escape(g)}"]`);
+  const seen = new Set(), list = [], dup = [];
+  box.querySelector(".rl").value.split("\n").map(cleanPart).filter(Boolean).forEach(n => {
+    if (n.split(" ").length < 2) { dup.push(`«${n}» — потрібні прізвище та ім'я`); return; }
+    const k = normName(n); if (seen.has(k)) { dup.push(`дубль «${n}»`); return; } seen.add(k); list.push(n);
+  });
+  if (dup.length && !confirm("Пропущено:\n" + dup.join("\n") + "\n\nЗберегти решту?")) return;
+  ROSTER[g] = list; await persistRoster(); warn("Збережено"); renderStudents();
+}
+async function rosterDel(g){
+  if (!confirm(`Видалити список групи ${g}? Студенти цієї групи вводитимуть ПІБ без перевірки. Результати не зміняться.`)) return;
+  delete ROSTER[g]; await persistRoster(); warn("Список видалено"); renderStudents();
+}
 // ---------- ключі
 function renderKeys(){
   const ready = allTopics().filter(t=>READY[t.id]);
@@ -161,7 +276,8 @@ const ACT = {
   load: ()=>{ ROWS=[]; loadTopic(SEL.topic).then(drawTable); }, detail: el=>detail(el.dataset.v), back: drawTable,
   unbind: async el=>{ await st.updateAttempt(el.dataset.v,{uid:null}); warn("Тепер студент може продовжити з іншого пристрою"); },
   reset: async el=>{ if(!confirm("Видалити всю спробу цього студента? Це не можна скасувати.")) return; await st.deleteAttempt(el.dataset.v); ROWS=ROWS.filter(r=>r.id!==el.dataset.v); drawTable(); },
-  exportJson, exportCsv
+  exportJson, exportCsv,
+  rosterCheck, rosterApply, rosterSave: el=>rosterSave(el.dataset.v), rosterDel: el=>rosterDel(el.dataset.v)
 };
 document.addEventListener("click", e=>{ const b=e.target.closest("[data-act]"); if(!b) return; e.preventDefault(); ACT[b.dataset.act](b); });
 start();

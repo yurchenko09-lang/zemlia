@@ -74,14 +74,25 @@ function renderLogin(){
       <li>Якщо доведеться перерватися, закрийте сторінку. Потім увійдіть з <b>того самого пристрою і браузера</b> з тими самими групою і ПІБ і продовжуйте.</li>
     </ol>
     <label>Група</label><select id="grp"><option value="">— оберіть —</option>${groups.map(g=>`<option>${esc(g)}</option>`).join("")}</select>
-    <label>Прізвище та ім'я</label><input type="text" id="nm" placeholder="Напр., Коваленко Олена" autocomplete="name">
+    <label>Прізвище та ім'я</label>${st.nameField()}
     <div class="row" style="margin-top:16px"><span class="bad" id="regErr"></span><span class="sp"></span><button data-act="login">Почати / продовжити</button></div></div>`;
 }
 async function login(){
-  const g=$("grp").value, n=$("nm").value.trim().replace(/\s+/g," ");
+  let g=$("grp").value, n=$("nm").value.trim().replace(/\s+/g," ");
   const er=$("regErr");
   if(!g){ er.textContent="Оберіть групу."; return; }
-  if(n.split(" ").length<2){ er.textContent="Введіть прізвище та ім'я."; return; }
+  if (!st.isUkrainian(n) || n.split(" ").length < 2) { er.textContent = "Введіть прізвище та ім'я українською."; return; }
+  if (st.hasRosterFor(SETTINGS, g)) {
+    er.textContent = "Перевіряємо…";
+    const m = await st.matchName(SETTINGS, g, n);
+    if (m.status === "none") { er.textContent = "Такого студента немає у списку групи. Перевірте групу і введіть прізвище та ім'я українською, як у журналі."; return; }
+    if (m.status === "hint") {
+      er.innerHTML = `Можливо, ви — ${m.names.map(x => `<button class="sm sec" data-pick="${esc(x)}">${esc(x)}</button>`).join(" ")}? Натисніть своє ім'я.`;
+      er.querySelectorAll("[data-pick]").forEach(b => b.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); $("nm").value = b.dataset.pick; login(); });
+      return;
+    }
+    n = m.name;          // точне написання зі списку
+  }
   er.textContent="Зачекайте…";
   AID = st.attemptId(T.id, g, n);
   let server;
