@@ -53,13 +53,13 @@ function formOf(box){
     topics: [...box.querySelectorAll(".tc:checked")].map(i => i.value),
     open: box.querySelector(".op").checked,
     nq: parseInt(box.querySelector(".nq").value, 10), minutes: parseInt(box.querySelector(".mn").value, 10),
-    showScore: box.querySelector(".ss").checked,
+    showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked,
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value),
     criteria: [...box.querySelectorAll(".crit tbody tr")].map(tr => ({ name: tr.querySelector(".cn").value.trim(), desc: tr.querySelector(".cd").value.trim(), max: parseInt(tr.querySelector(".cm").value, 10) })).filter(c => c.name)
   };
 }
-const cmpKeys = ["title","topics","open","nq","minutes","showScore","groups","criteria"];
-const norm = o => o ? { title: o.title || "", topics: o.topics || [], open: !!o.open, nq: o.nq || 6, minutes: o.minutes ?? 20, showScore: !!o.showScore, groups: o.groups || [],
+const cmpKeys = ["title","topics","open","nq","minutes","showScore","adaptive","groups","criteria"];
+const norm = o => o ? { title: o.title || "", topics: o.topics || [], open: !!o.open, nq: o.nq || 6, minutes: o.minutes ?? 20, showScore: !!o.showScore, adaptive: o.adaptive !== false, groups: o.groups || [],
   criteria: (o.criteria && o.criteria.length ? o.criteria : DEFAULT_CRITERIA).map(c => ({ name: c.name, desc: c.desc || "", max: Number(c.max) })) } : null;
 const pick = o => { const n = norm(o); return JSON.stringify(cmpKeys.map(k => n ? n[k] : null)); };
 // стан збереженої співбесіди (для огляду і плашки)
@@ -140,6 +140,7 @@ function renderSetup(){
           <span class="hint">Питань:</span><input type="text" class="nq num" value="${esc(c.nq||6)}" inputmode="numeric">
           <span class="hint">Час, хв (0 — без обмеження):</span><input type="text" class="mn num" value="${esc(c.minutes ?? 20)}" inputmode="numeric">
           <label class="chk"><input type="checkbox" class="ss" ${c.showScore?'checked':''}> Показувати студенту бал ШІ</label>
+          <label class="chk" title="ШІ починає з простих питань, ускладнює для сильних, а слабшим дає одне спрощення (навідне питання або 3 варіанти). Спрощення знижують бал."><input type="checkbox" class="ad" ${c.adaptive !== false ? 'checked' : ''}> Адаптивна складність</label>
         </div>
         <div><span class="hint">Групи: </span>${G.map(g=>`<label class="chk"><input type="checkbox" class="gr" value="${esc(g)}" ${(c.groups||[]).includes(g)?'checked':''}> ${esc(g)}</label>`).join("") || '<span class="hint">спершу додайте групи в основному кабінеті</span>'}</div>
         <details class="cfg"><summary>Критерії оцінювання (разом ${sum} б.)</summary>
@@ -161,14 +162,14 @@ const isLocked = id => { const a = ATT[id]; return !!(SAVED[id] && !SAVED[id].un
 function applyLock(id){
   const box = document.querySelector(`.tp[data-t="${id}"]`); if (!box) return;
   const lock = isLocked(id);
-  box.querySelectorAll(".tc, .nq, .crit input, [data-act=addCrit], [data-act=resetCrit], [data-act=delCrit]").forEach(el => el.disabled = lock);
+  box.querySelectorAll(".tc, .nq, .ad, .crit input, [data-act=addCrit], [data-act=resetCrit], [data-act=delCrit]").forEach(el => el.disabled = lock);
   const a = ATT[id];
-  box.querySelector(".lockmsg").innerHTML = lock ? `<div class="info">🔒 Співбесіду вже проходили (${a.done} завершили, ${a.prog} в процесі), тому <b>теми, кількість питань і критерії заблоковано</b> — інакше студенти отримали б різні питання й оцінювалися б за різними правилами. Змінювати можна групи, час, показ балу, відкриття/закриття. Щоб змінити зміст — натисніть «Копія» і налаштуйте нову співбесіду.</div>` : "";
+  box.querySelector(".lockmsg").innerHTML = lock ? `<div class="info">🔒 Співбесіду вже проходили (${a.done} завершили, ${a.prog} в процесі), тому <b>теми, кількість питань, адаптивність і критерії заблоковано</b> — інакше студенти отримали б різні питання й оцінювалися б за різними правилами. Змінювати можна групи, час, показ балу, відкриття/закриття. Щоб змінити зміст — натисніть «Копія» і налаштуйте нову співбесіду.</div>` : "";
 }
 let EDIT = new Set();
 async function newInterview(){
   const id = "s" + Date.now().toString(36);
-  SETTINGS.ai[id] = { title: "", topics: [], open: false, nq: 6, minutes: 20, showScore: false, groups: [], criteria: DEFAULT_CRITERIA, created: Date.now(), unsaved: true };
+  SETTINGS.ai[id] = { title: "", topics: [], open: false, nq: 6, minutes: 20, showScore: false, adaptive: true, groups: [], criteria: DEFAULT_CRITERIA, created: Date.now(), unsaved: true };
   render();
   const box = document.querySelector(`.tp[data-t="${id}"]`); box.scrollIntoView({ behavior: "smooth", block: "center" }); box.querySelector(".ti").focus();
 }
@@ -189,7 +190,7 @@ async function saveTopic(id){
   if (!(nq >= 3 && nq <= 12)) { boxMsg(id, "Кількість питань — від 3 до 12."); return; }
   if (!(mn >= 0 && mn <= 180)) { boxMsg(id, "Час — від 0 до 180 хвилин."); return; }
   if (nq < topics.length) { if (!confirm(`Тем (${topics.length}) більше, ніж питань (${nq}) — деякі теми залишаться без питання. Зберегти так?`)) return; }
-  SETTINGS.ai[id] = { title, topics, open: box.querySelector(".op").checked, nq, minutes: mn, showScore: box.querySelector(".ss").checked,
+  SETTINGS.ai[id] = { title, topics, open: box.querySelector(".op").checked, nq, minutes: mn, showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked,
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value), criteria: crit, created: (SETTINGS.ai[id] && SETTINGS.ai[id].created) || Date.now() };
   await st.saveSettings(SETTINGS); snap(); render(); boxMsg(id, "Збережено ✓ Зміни діють приблизно за 30 секунд.", false);
 }
@@ -246,6 +247,12 @@ function asked(r){ return (r.messages||[]).filter(m => m.role === "assistant" &&
 function duration(r){ const a = r.meta && r.meta.startedAt, b = (r.meta && r.meta.finishedAt) || r.updatedAt; return a && b ? (new Date(b) - new Date(a)) / 1000 : 0; }
 function avgSecs(r){ const s = (r.meta && r.meta.secs) || []; return s.length ? s.reduce((x,y)=>x+y,0) / s.length : 0; }
 
+// рівень, якого студент досяг сам, і скільки спрощень знадобилося
+function lvl(e){
+  if (!e || (!e.level && e.hints == null)) return "—";
+  const l = String(e.level || "").toLowerCase(), cls = l.startsWith("вис") ? "p-lo" : l.startsWith("сер") ? "p-mid" : l.startsWith("баз") ? "p-hi" : "";
+  return `${e.level ? `<span class="pill ${cls}">${esc(e.level)}</span>` : ""}${e.hints != null ? ` <span class="hint">${e.hints} спрощ.</span>` : ""}`;
+}
 // стан спроби студента
 function attemptState(r){
   if (!r) return { label: "не розпочинав", cls: "st-off", order: 3 };
@@ -284,11 +291,11 @@ function renderResults(){
     <div class="row"><select id="selT" style="width:auto;flex:1;min-width:240px"><option value="">— співбесіда —</option>${list.map(([id,c])=>`<option value="${id}" ${SEL.topic===id?'selected':''}>${esc(c.title||"без назви")}</option>`).join("")}</select>
       <select id="selG" style="width:auto"><option value="">Усі групи</option>${groups.map(g=>`<option ${SEL.group===g?'selected':''}>${esc(g)}</option>`).join("")}</select>
       <button class="sec sm" data-act="reload">Оновити</button><button class="sec sm" data-act="csv" ${att.length?'':'disabled'}>CSV</button><button class="sec sm" data-act="json" ${att.length?'':'disabled'}>JSON (протоколи)</button></div>
-    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th>Підозра ШІ</th><th title="Перемикання вкладок">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th></tr></thead><tbody>
-      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="7"></td></tr>`;
+    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th title="Найвищий рівень, на якому студент упевнено відповідав сам · кількість спрощень">Рівень · спрощень</th><th>Підозра ШІ</th><th title="Перемикання вкладок">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th></tr></thead><tbody>
+      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="8"></td></tr>`;
         const e = r.eval || evalFromText(r) || {}; return `<tr class="clk" data-act="open" data-v="${esc(r.id)}">
         <td>${esc(r.name)}</td><td>${esc(r.group)}</td><td><span class="pill ${s0.cls}">${esc(s0.label)}</span></td>
-        <td>${e.max ? `<b>${e.total}</b> / ${e.max}` : "—"}</td><td>${e.ai_suspect ? suspect(e.ai_suspect) : "—"}</td>
+        <td>${e.max ? `<b>${e.total}</b> / ${e.max}` : "—"}</td><td>${lvl(e)}</td><td>${e.ai_suspect ? suspect(e.ai_suspect) : "—"}</td>
         <td>${(r.meta&&r.meta.blur)||0}</td><td>${(r.meta&&r.meta.pastes)||0}</td><td>${fmt(avgSecs(r))}</td><td>${fmt(duration(r))}</td>
         <td data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</td></tr>`; }).join("")}
       </tbody></table></div>` : '<p class="hint" style="margin-top:12px">Ще ніхто не проходив цю співбесіду, а списків груп немає.</p>') : `<p class="hint" style="margin-top:12px">Оберіть співбесіду.</p>`}
@@ -312,6 +319,7 @@ function detailHtml(r){
       ${(e.criteria||[]).map(c=>`<tr><td>${esc(c.name)}</td><td style="white-space:nowrap"><b>${c.score}</b> / ${c.max}</td><td>${esc(c.comment)}</td></tr>`).join("")}</tbody></table>
       <p><b>Підсумок:</b> ${esc(e.summary)}</p>
       ${e.gaps && e.gaps.length ? `<p><b>Прогалини:</b> ${e.gaps.map(esc).join("; ")}</p>` : ""}
+      ${e.level || e.hints != null ? `<p><b>Рівень:</b> ${lvl(e)} ${esc(e.level_why || "")}</p>` : ""}
       ${e.ai_suspect ? `<p><b>Ймовірність використання ШІ:</b> ${suspect(e.ai_suspect)} ${esc(e.ai_suspect_why)}</p>` : ""}` : `<p class="hint">Співбесіда ще не завершена — оцінки поки немає.</p>`}
     <p class="hint">Вкладки: ${(r.meta&&r.meta.blur)||0} · Спроби вставки: ${(r.meta&&r.meta.pastes)||0} · Тривалість: ${fmt(duration(r))}${r.meta&&r.meta.aiNoticeAccepted ? ` · Попередження про ШІ прийнято: ${new Date(r.meta.aiNoticeAccepted).toLocaleString("uk-UA")}` : ""}</p>
     ${e && !r.eval ? '<div class="info">Оцінку відновлено з тексту діалогу (стара версія воркера). Протокол не завершено — за потреби дозвольте пройти заново.</div>' : ""}
@@ -345,10 +353,10 @@ function exportCsv(){
   const rows = ROWS.filter(r => !SEL.group || r.group === SEL.group);
   const crit = [...new Set(rows.flatMap(r => ((r.eval||{}).criteria||[]).map(c => c.name)))];
   const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
-  const head = ["Група","Студент","Стан","Бал","Макс",...crit,"Підозра ШІ","Вкладки","Вставки","Сер. час відповіді, с","Тривалість, с","Протокол","Підсумок"];
+  const head = ["Група","Студент","Стан","Бал","Макс",...crit,"Рівень","Спрощень","Підозра ШІ","Вкладки","Вставки","Сер. час відповіді, с","Тривалість, с","Протокол","Підсумок"];
   const lines = rows.map(r => { const e = r.eval || {}; return [r.group, r.name, r.done?"завершено":"в процесі", e.total ?? "", e.max ?? "",
     ...crit.map(n => { const c = (e.criteria||[]).find(x => x.name === n); return c ? c.score : ""; }),
-    e.ai_suspect || "", (r.meta&&r.meta.blur)||0, (r.meta&&r.meta.pastes)||0, Math.round(avgSecs(r)), Math.round(duration(r)),
+    e.level || "", e.hints ?? "", e.ai_suspect || "", (r.meta&&r.meta.blur)||0, (r.meta&&r.meta.pastes)||0, Math.round(avgSecs(r)), Math.round(duration(r)),
     VER[r.id] === "ok" ? "ок" : VER[r.id] === "bad" ? "змінено" : "", e.summary || ""].map(q).join(";"); });
   download(`spivbesida_${SEL.topic}${SEL.group?"_"+SEL.group:""}.csv`, "﻿" + [head.map(q).join(";"), ...lines].join("\r\n"), "text/csv;charset=utf-8");
 }
