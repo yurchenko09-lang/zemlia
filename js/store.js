@@ -1,5 +1,9 @@
 // Сховище: Firebase (робочий режим) або localStorage (демо-режим)
-import { firebaseConfig, TEACHER_EMAIL } from "./firebase-config.js";
+import * as CFG from "./firebase-config.js";
+const { firebaseConfig, TEACHER_EMAIL } = CFG;
+// Предмет: якщо в firebase-config.js є SUBJECT, налаштування і списки зберігаються окремо (config/settings_<SUBJECT>, keys/roster_<SUBJECT>)
+const SETTINGS_DOC = CFG.SUBJECT ? "settings_" + CFG.SUBJECT : "settings";
+const ROSTER_DOC = CFG.SUBJECT ? "roster_" + CFG.SUBJECT : "roster";
 export const DEMO = !firebaseConfig.apiKey || firebaseConfig.apiKey === "ВСТАВТЕ";
 const V = "10.12.2";
 let fb = null;
@@ -34,8 +38,8 @@ export async function studentInit(){
   return f.A.currentUser.uid;
 }
 export async function getSettings(){
-  if (DEMO) return LS.get("settings") || DEMO_SETTINGS;
-  const f = await F(); const s = await f.fs.getDoc(f.fs.doc(f.D,"config","settings"));
+  if (DEMO) return LS.get(SETTINGS_DOC) || DEMO_SETTINGS;
+  const f = await F(); const s = await f.fs.getDoc(f.fs.doc(f.D,"config",SETTINGS_DOC));
   return s.exists() ? s.data() : { groups:[], topics:{} };
 }
 export async function getAttempt(id){
@@ -65,8 +69,8 @@ export async function teacherSignIn(){
   return r.user;
 }
 export async function saveSettings(s){
-  if (DEMO) { LS.set("settings", s); return; }
-  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"config","settings"), s);
+  if (DEMO) { LS.set(SETTINGS_DOC, s); return; }
+  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"config",SETTINGS_DOC), s);
 }
 export async function listAttempts(topic){
   if (DEMO) return LS.keys("att:"+topic+"__").map(k=>({ id:k.slice(4), ...LS.get(k) }));
@@ -141,13 +145,13 @@ export async function matchName(settings, group, typed){
 }
 export const isUkrainian = s => !/[a-z]/i.test(s) && !/[ыэъё]/i.test(s) && /[а-яіїєґ]/i.test(s);
 export async function getRoster(){
-  if (DEMO) return LS.get("roster") || {};
-  const f = await F(); const d = await f.fs.getDoc(f.fs.doc(f.D,"keys","roster"));
+  if (DEMO) return LS.get(ROSTER_DOC) || {};
+  const f = await F(); const d = await f.fs.getDoc(f.fs.doc(f.D,"keys",ROSTER_DOC));
   return d.exists() ? JSON.parse(d.data().data || "{}") : {};
 }
 export async function saveRoster(roster){
-  if (DEMO) { LS.set("roster", roster); return; }
-  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"keys","roster"), { data: JSON.stringify(roster) });
+  if (DEMO) { LS.set(ROSTER_DOC, roster); return; }
+  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"keys",ROSTER_DOC), { data: JSON.stringify(roster) });
 }
 // поле ПІБ — завжди звичайне текстове (список студентам не показуємо)
 export function nameField(){ return `<input type="text" id="nm" placeholder="Прізвище та ім'я, напр. Коваленко Олена" autocomplete="name">`; }

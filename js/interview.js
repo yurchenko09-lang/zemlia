@@ -1,5 +1,5 @@
 import * as st from "./store.js";
-import { WORKER_URL } from "./ai-config.js";
+import { WORKER_URL, AI_SUBJECT } from "./ai-config.js";
 
 const START = "Починаймо співбесіду.";
 const MAX_ANSWER = 2000;
@@ -52,7 +52,7 @@ function renderLogin(){
   $("app").innerHTML = `<div class="card">
     <div class="hint">Співбесіда з ШІ-екзаменатором</div><div class="tq">${esc(TITLE)}</div><div class="hint" style="margin-bottom:10px">${TLIST}</div>
     <ol class="hint" style="padding-left:20px;margin:0">
-      <li>ШІ поставить <b>${nq} питань</b> за матеріалом ${(CFG.topics||[]).length > 1 ? "цих тем" : "лекції"} і може уточнювати ваші відповіді.</li>
+      <li>ШІ поставить <b>${nq} ${nq % 10 >= 2 && nq % 10 <= 4 && (nq % 100 < 12 || nq % 100 > 14) ? "питання" : nq % 10 === 1 && nq % 100 !== 11 ? "питання" : "питань"}</b> за матеріалом ${(CFG.topics||[]).length > 1 ? "цих тем" : "лекції"} і може уточнювати ваші відповіді.</li>
       <li>Відповідайте <b>своїми словами</b>, як на усному занятті. Вставляти скопійований текст не можна.</li>
       ${CFG.minutes ? `<li>На всю співбесіду — <b>${CFG.minutes} хв</b>. Коли час мине, співбесіда завершиться автоматично.</li>` : ""}
       ${CFG.adaptive !== false ? `<li>Якщо питання здається складним — так і напишіть «не знаю» або «не зрозумів». ШІ запропонує <b>простіший варіант</b> (навідне питання або варіанти на вибір). Краще відповісти з підказкою, ніж не відповісти зовсім.</li>` : ""}
@@ -181,7 +181,7 @@ async function send(text, finish = false){
   try {
     const r = await fetch(WORKER_URL.replace(/\/$/,"") + "/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: TID, sid: AID, seed: A.meta.seed || "", messages: A.messages, sig: A.sig, finish: finish || timeIsUp() })
+      body: JSON.stringify({ subject: AI_SUBJECT, topic: TID, sid: AID, seed: A.meta.seed || "", messages: A.messages, sig: A.sig, finish: finish || timeIsUp() })
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(d.error || ("Помилка " + r.status)), { status: r.status });

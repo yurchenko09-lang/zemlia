@@ -1,5 +1,5 @@
 import * as st from "./store.js";
-import { WORKER_URL } from "./ai-config.js";
+import { WORKER_URL, AI_SUBJECT } from "./ai-config.js";
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -227,7 +227,7 @@ async function verify(r){
   if (!r.messages || r.messages.length < 2 || !r.sig) { VER[r.id] = "none"; return; }
   try {
     const res = await fetch(WORKER_URL.replace(/\/$/,"") + "/verify", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.done ? (r.eval ?? null) : null }) }).then(x => x.json());
+      body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.done ? (r.eval ?? null) : null }) }).then(x => x.json());
     VER[r.id] = res.ok ? "ok" : "bad";
   } catch(e){ VER[r.id] = "err"; }
   if (TAB === "results") paintVer(r.id);
@@ -336,7 +336,7 @@ function detailHtml(r){
 // переоцінити завершену спробу: воркер перевіряє підпис, оцінює протокол заново і підписує нову оцінку
 async function regradeOne(r){
   const res = await fetch(WORKER_URL.replace(/\/$/,"") + "/regrade", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.eval ?? null }) });
+    body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.eval ?? null }) });
   const d = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(d.error || ("Помилка " + res.status));
   const prev = r.evalPrev || r.eval || null;
