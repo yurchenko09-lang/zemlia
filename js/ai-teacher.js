@@ -300,7 +300,7 @@ function renderResults(){
         <td data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</td></tr>`; }).join("")}
       </tbody></table></div>` : '<p class="hint" style="margin-top:12px">Ще ніхто не проходив цю співбесіду, а списків груп немає.</p>') : `<p class="hint" style="margin-top:12px">Оберіть співбесіду.</p>`}
   </div>
-  ${att.length ? `<div class="card"><div class="row"><h3 style="margin:0">Протоколи (${att.length})</h3><span class="sp"></span><button class="sm sec" data-act="expandAll">Розгорнути всі</button><button class="sm sec" data-act="collapseAll">Згорнути всі</button></div>
+  ${att.length ? `<div class="card"><div class="row"><h3 style="margin:0">Протоколи (${att.length})</h3><span class="sp"></span><button class="sm sec" data-act="regradeAll">Переоцінити всіх завершених</button><button class="sm sec" data-act="expandAll">Розгорнути всі</button><button class="sm sec" data-act="collapseAll">Згорнути всі</button></div>
     ${rows.filter(x => x.r).map(({ r }) => { const s0 = attemptState(r), e = r.eval || evalFromText(r);
       return `<details class="proto" id="p-${esc(r.id)}" ${COLLAPSED.has(r.id) ? "" : "open"} data-pid="${esc(r.id)}"><summary><b>${esc(r.name)}</b> · ${esc(r.group)} <span class="pill ${s0.cls}">${esc(s0.label)}</span>${e && e.max ? ` <b>${e.total} / ${e.max}</b>` : ""}</summary>${detailHtml(r)}</details>`; }).join("")}</div>` : ""}`;
   $("selT").onchange = async e => { SEL = { topic: e.target.value, group: "", id: "" }; await loadRows(); render(); };
@@ -322,14 +322,26 @@ function detailHtml(r){
       ${e.level || e.hints != null ? `<p><b>Рівень:</b> ${lvl(e)} ${esc(e.level_why || "")}</p>` : ""}
       ${e.ai_suspect ? `<p><b>Ймовірність використання ШІ:</b> ${suspect(e.ai_suspect)} ${esc(e.ai_suspect_why)}</p>` : ""}` : `<p class="hint">Співбесіда ще не завершена — оцінки поки немає.</p>`}
     <p class="hint">Вкладки: ${(r.meta&&r.meta.blur)||0} · Спроби вставки: ${(r.meta&&r.meta.pastes)||0} · Тривалість: ${fmt(duration(r))}${r.meta&&r.meta.aiNoticeAccepted ? ` · Попередження про ШІ прийнято: ${new Date(r.meta.aiNoticeAccepted).toLocaleString("uk-UA")}` : ""}</p>
+    ${r.evalPrev && r.eval ? `<p class="hint">Переоцінено ${r.regradedAt ? new Date(r.regradedAt).toLocaleString("uk-UA") : ""}: спершу було <b>${r.evalPrev.total} / ${r.evalPrev.max}</b>.</p>` : ""}
     ${e && !r.eval ? '<div class="info">Оцінку відновлено з тексту діалогу (стара версія воркера). Протокол не завершено — за потреби дозвольте пройти заново.</div>' : ""}
     ${(r.messages||[]).slice(1).map(m => m.role === "user"
         ? `<div class="msg me">${esc(m.content)}${secs[ui] != null ? `<small>${fmt(secs[ui++])} · ${m.content.length} симв.</small>` : ""}</div>`
         : `<div class="msg ai">${esc(m.content.split(/<eval>/i)[0].trim() || "(оцінка — вище)")}</div>`).join("")}
     <div class="row" style="margin-top:12px"><span class="sp"></span>
       ${!r.done && r.uid ? `<button class="sm sec" data-act="unbind" data-v="${esc(r.id)}">Дозволити продовжити з іншого пристрою</button>` : ""}
+      ${r.done && r.sig ? `<button class="sm sec" data-act="regrade" data-v="${esc(r.id)}">Переоцінити за поточними правилами</button>` : ""}
       <button class="sm sec" data-act="del" data-v="${esc(r.id)}">Дозволити пройти заново</button></div>
   </div>`;
+}
+// переоцінити завершену спробу: воркер перевіряє підпис, оцінює протокол заново і підписує нову оцінку
+async function regradeOne(r){
+  const res = await fetch(WORKER_URL.replace(/\/$/,"") + "/regrade", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.eval ?? null }) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || ("Помилка " + res.status));
+  const prev = r.evalPrev || r.eval || null;
+  await st.updateAttempt(r.id, { eval: d.eval, score: d.eval.total, sig: d.sig, evalPrev: prev, regradedAt: new Date().toISOString() });
+  return { from: r.eval ? r.eval.total : null, to: d.eval.total, max: d.eval.max };
 }
 // оцінка, що потрапила в текст повідомлення ШІ (обрізана чи без тега) → об'єкт для показу
 function evalFromText(r){
@@ -385,6 +397,18 @@ document.addEventListener("click", async ev => {
     else if (act === "resetCrit") el.closest(".tp").querySelector(".crit tbody").innerHTML = critRows(DEFAULT_CRITERIA);
     else if (act === "reload") { await loadRows(); render(); }
     else if (act === "open") { SEL.id = v; render(); }
+    else if (act === "regrade") {
+      const r = ROWS.find(x => x.id === v); el.disabled = true; el.textContent = "Переоцінюю…";
+      const x = await regradeOne(r); warn(`${esc(r.name)}: ${x.from ?? "—"} → <b>${x.to}</b> / ${x.max}`); SEL.id = v; await loadRows(); render();
+    }
+    else if (act === "regradeAll") {
+      const list = ROWS.filter(r => r.done && r.sig && (!SEL.group || r.group === SEL.group));
+      if (!list.length) { warn("Немає завершених співбесід"); return; }
+      if (!confirm(`Переоцінити ${list.length} завершених співбесід за поточними правилами? Попередні оцінки збережуться для порівняння. Це займе приблизно ${Math.ceil(list.length * 8 / 60)} хв.`)) return;
+      el.disabled = true; let ok = 0, fail = 0;
+      for (const r of list) { el.textContent = `Переоцінюю ${ok + fail + 1} з ${list.length}…`; try { await regradeOne(r); ok++; } catch(e){ fail++; } }
+      warn(`Переоцінено: ${ok}${fail ? `, з помилкою: ${fail} (спробуйте ще раз)` : ""}.`); await loadRows(); render();
+    }
     else if (act === "expandAll") { COLLAPSED.clear(); document.querySelectorAll("details.proto").forEach(d => d.open = true); }
     else if (act === "collapseAll") { document.querySelectorAll("details.proto").forEach(d => { d.open = false; COLLAPSED.add(d.dataset.pid); }); }
     else if (act === "csv") exportCsv();
