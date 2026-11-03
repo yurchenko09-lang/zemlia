@@ -1,5 +1,5 @@
 import * as st from "./store.js";
-import { WORKER_URL, AI_SUBJECT } from "./ai-config.js";
+import { WORKER_URL, AI_SUBJECT, EXAM_BANK } from "./ai-config.js";
 
 const START = "Починаймо співбесіду.";
 const MAX_ANSWER = 2000;
@@ -9,7 +9,8 @@ const params = new URLSearchParams(location.search);
 const TID = (params.get("i") || "").trim();
 
 let SETTINGS, CFG, TITLE = "", TLIST = "", A = null, AID = null, UID = null;
-let busy = false, askedAt = 0, timerId = null, finishing = false;
+let busy = false, askedAt = 0, timerId = null, finishing = false, TRAIN = false, GROUP = "", NAME = "";
+const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
 
 const local = {
   get(id){ try { return JSON.parse(localStorage.getItem("ai:"+id)); } catch(e){ return null; } },
@@ -37,18 +38,20 @@ async function start(){
     COURSE = await fetch("course.json", { cache: "no-cache" }).then(r => r.json());
   } catch(e){ $("app").innerHTML = `<div class="card">Не вдалося завантажити сторінку. Перевірте інтернет і оновіть сторінку.<br><span class="hint">${esc(e.message||e)}</span></div>`; return; }
   CFG = (SETTINGS.ai || {})[TID] || {};
+  TRAIN = CFG.mode === "train";
   const all = COURSE.sections.flatMap(s => s.topics);
   const tl = (CFG.topics || []).map(id => all.find(t => t.id === id)).filter(Boolean);
-  TITLE = CFG.title || (tl.length === 1 ? `Тема ${tl[0].num}` : "Співбесіда");
-  TLIST = tl.map(t => `Тема ${t.num}. ${esc(t.title)}`).join("<br>");
-  $("htitle").textContent = "Співбесіда · " + TITLE;
+  TITLE = CFG.title || (tl.length === 1 ? `Тема ${tl[0].num}` : TRAIN ? "Підготовка до екзамену" : "Співбесіда");
+  TLIST = tl.length > 8 ? `${tl.length} тем курсу` : tl.map(t => `Тема ${t.num}. ${esc(t.title)}`).join("<br>");
+  $("htitle").textContent = (TRAIN ? "Підготовка · " : "Співбесіда · ") + TITLE;
   if (!CFG.open) { $("app").innerHTML = `<div class="card"><div class="tq">${esc(TITLE)}</div><p>Ця співбесіда зараз закрита.</p></div>`; return; }
   renderLogin();
 }
 
 function renderLogin(){
   const groups = (CFG.groups && CFG.groups.length ? CFG.groups : SETTINGS.groups) || [];
-  const nq = CFG.nq || 6;
+  const nq = CFG.nq || (TRAIN ? 10 : 6);
+  if (TRAIN) { renderTrainLogin(groups, nq); return; }
   $("app").innerHTML = `<div class="card">
     <div class="hint">Співбесіда з ШІ-екзаменатором</div><div class="tq">${esc(TITLE)}</div><div class="hint" style="margin-bottom:10px">${TLIST}</div>
     <ol class="hint" style="padding-left:20px;margin:0">
@@ -77,6 +80,48 @@ function renderLogin(){
 
 }
 
+function renderTrainLogin(groups, nq){
+  $("app").innerHTML = `<div class="card">
+    <div class="hint">Підготовка до екзамену з ШІ-помічником</div><div class="tq">${esc(TITLE)}</div><div class="hint" style="margin-bottom:10px">${TLIST}</div>
+    <ol class="hint" style="padding-left:20px;margin:0">
+      <li>ШІ-помічник дасть <b>${nq} ${plural(nq, "завдання", "завдання", "завдань")}</b>${CFG.kinds && CFG.kinds.length ? ` (${CFG.kinds.map(k => ({ test: "тести", match: "на відповідність", task: "задачі" }[k])).filter(Boolean).join(", ")})` : ""}${EXAM_BANK ? " — такі, як будуть на екзамені" : " за лекціями курсу"}.</li>
+      <li><b>Помилятися можна.</b> Якщо відповідь неправильна чи ви не знаєте — ШІ підкаже і допоможе дійти до правильної відповіді, а потім пояснить її.</li>
+      <li>${(() => { const k = EXAM_BANK ? (CFG.kinds && CFG.kinds.length ? CFG.kinds : ["task"]) : ["block"];
+        return [k.includes("test") ? "тест — відповідайте літерою (А, Б, В, Г)" : "", k.includes("match") ? "відповідність — парами «1–А, 2–В…»" : "",
+          k.includes("task") ? "задачу розв'язуйте покроково: формула → числа → відповідь; якщо не знаєте, з чого почати, — так і напишіть, ШІ підкаже" : "",
+          k.includes("block") ? "відповідайте своїми словами; не знаєте — напишіть «не знаю», ШІ підкаже" : ""].filter(Boolean).join("; ").replace(/^./, c => c.toUpperCase()); })()}.</li>
+      <li>Це <b>тренування, оцінка не ставиться</b>. Викладач бачить лише, скільки завдань ви пройшли і що варто повторити.</li>
+      <li>Тренуватися можна скільки завгодно: після завершення натисніть «Ще одне тренування» — завдання будуть інші.</li>
+      <li>Якщо зник зв'язок чи світло, відкрийте посилання знову з того самого пристрою — продовжите з того ж місця.</li>
+    </ol>
+    <div class="info" style="margin-top:14px">
+      <b>⚠ Завдання дає і пояснює штучний інтелект.</b>
+      <ul style="margin:6px 0 0;padding-left:20px">
+        <li>Помічник — мовна модель Claude (Anthropic). ${EXAM_BANK ? "Правильні відповіді він бере з банку екзаменаційних завдань викладача, а пояснення — з лекцій курсу." : "Питання і пояснення він бере з лекцій курсу."}</li>
+        <li>ШІ отримує лише текст ваших відповідей; прізвище, ім'я і група йому <b>не передаються</b>. Відповіді не використовуються для навчання моделі.</li>
+        <li>ШІ може помилитися в поясненні. Якщо щось здається неправильним — запитайте викладача.</li>
+      </ul>
+    </div>
+    <label class="chk" style="margin:6px 0 4px"><input type="checkbox" id="agree"> Я ознайомився(-лася) і розумію, що завдання дає і пояснює ШІ</label>
+    <label>Група</label><select id="grp"><option value="">— оберіть —</option>${groups.map(g=>`<option>${esc(g)}</option>`).join("")}</select>
+    <label>Прізвище та ім'я</label>${st.nameField()}
+    <div class="row" style="margin-top:16px"><span class="bad" id="regErr"></span><span class="sp"></span><button id="go">Почати / продовжити</button></div></div>`;
+  $("go").onclick = login;
+}
+// тренування: шукаємо незавершену сесію або наступний вільний номер (base, base__s2, base__s3 …)
+async function findSession(base){
+  for (let k = 1; k <= 99; k++) {
+    const id = k === 1 ? base : base + "__s" + k;
+    let server; try { server = await st.getAttempt(id); } catch(e){ server = undefined; }
+    if (server && server.__locked) return { id, locked: true };
+    const loc = local.get(id);
+    if (server === undefined && loc && !loc.done) return { id };
+    if (!server && !(server === undefined && loc)) return { id };
+    if (server && !server.done) return { id };
+  }
+  return { id: base + "__s" + Date.now() };
+}
+
 async function login(){
   let g = $("grp").value, n = $("nm").value.trim().replace(/\s+/g," ");
   const er = $("regErr");
@@ -95,7 +140,13 @@ async function login(){
     n = m.name;          // точне написання зі списку
   }
   er.textContent = "Зачекайте…"; $("go").disabled = true;
+  GROUP = g; NAME = n;
   AID = st.attemptId("ai-"+TID, g, n);
+  if (TRAIN) {
+    const fsn = await findSession(AID);
+    if (fsn.locked) { er.innerHTML = "Тренування вже розпочато на <b>іншому пристрої чи браузері</b>. Продовжіть там або попросіть викладача дозволити продовження тут."; $("go").disabled = false; return; }
+    AID = fsn.id;
+  }
   let server;
   try { server = await st.getAttempt(AID); } catch(e){ server = undefined; }
   if (server && server.__locked) { er.innerHTML = "Цю співбесіду ви вже почали на <b>іншому пристрої чи браузері</b>. Продовжіть там або попросіть викладача дозволити продовження тут."; $("go").disabled = false; return; }
@@ -103,9 +154,9 @@ async function login(){
   if (server === null && loc && loc.done) loc = null;     // викладач дозволив пройти заново
   // беремо новішу копію (локальна може бути новішою, якщо зник зв'язок)
   A = server && loc ? ((loc.messages||[]).length > (server.messages||[]).length ? loc : server) : (server || loc);
-  if (A && A.done) { renderDone(); return; }
+  if (A && A.done) { if (TRAIN) { renderChat(); renderTrainDone(); } else renderDone(); return; }
   if (!A) {
-    A = { topic: "ai-"+TID, t: TID, topics: CFG.topics || [], group: g, name: n, uid: UID, messages: [], sig: "", done: false,
+    A = { topic: "ai-"+TID, t: TID, topics: CFG.topics || [], group: g, name: n, uid: UID, messages: [], sig: "", done: false, ...(TRAIN ? { mode: "train", session: AID.includes("__s") ? Number(AID.split("__s").pop()) || 2 : 1 } : {}),
           meta: { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [], aiNoticeAccepted: new Date().toISOString(), seed: Math.random().toString(36).slice(2, 12) } };
   }
   A.uid = UID; A.meta ||= { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [] };
@@ -126,17 +177,19 @@ function renderChat(){
   unwarn();
   $("app").innerHTML = `<div class="card">
     <div class="hint">${esc(TITLE)}</div>
-    <div class="hint" style="margin-bottom:8px">${esc(A.name)} · ${esc(A.group)}</div>
+    <div class="hint" style="margin-bottom:8px">${esc(A.name)} · ${esc(A.group)}${TRAIN && A.session > 1 ? ` · тренування № ${A.session}` : ""}</div>
     <div class="chat" id="chat">${A.messages.map(bubble).join("")}</div>
     <div class="composer" id="composer">
-      <textarea id="ans" maxlength="${MAX_ANSWER}" placeholder="Ваша відповідь своїми словами…" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+      <textarea id="ans" maxlength="${MAX_ANSWER}" placeholder="${TRAIN ? "Ваша відповідь (літера, пари або розв'язок)…" : "Ваша відповідь своїми словами…"}" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
       <div class="row" style="margin-top:8px"><span class="cnt" id="cnt">0 / ${MAX_ANSWER}</span><span class="bad" id="sendErr"></span><span class="sp"></span>
         <button id="send">Надіслати</button></div>
       <div class="hint" style="margin-top:6px">Ctrl+Enter — надіслати</div>
     </div></div>`;
   const ta = $("ans");
-  ta.addEventListener("paste", noPaste); ta.addEventListener("drop", noPaste);
-  ta.addEventListener("beforeinput", e => { if (e.inputType === "insertFromPaste" || e.inputType === "insertFromDrop") noPaste(e); });
+  if (!TRAIN) {
+    ta.addEventListener("paste", noPaste); ta.addEventListener("drop", noPaste);
+    ta.addEventListener("beforeinput", e => { if (e.inputType === "insertFromPaste" || e.inputType === "insertFromDrop") noPaste(e); });
+  }
   ta.addEventListener("input", () => { $("cnt").textContent = `${ta.value.length} / ${MAX_ANSWER}`; try { localStorage.setItem("ai-draft:"+AID, ta.value); } catch(e){} });
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSend(); } });
   try { ta.value = localStorage.getItem("ai-draft:"+AID) || ""; $("cnt").textContent = `${ta.value.length} / ${MAX_ANSWER}`; } catch(e){}
@@ -193,6 +246,7 @@ async function send(text, finish = false){
       A.done = true; A.eval = d.eval; A.score = d.eval ? d.eval.total : null;
       A.meta.finishedAt = new Date().toISOString();
       await save();
+      if (TRAIN) { busy = false; renderTrainDone(); return; }
       setTimeout(renderDone, 1500);
       return;
     }
@@ -243,6 +297,26 @@ function startTimer(){
     }
   };
   tick(); timerId = setInterval(tick, 1000);
+}
+
+// ---------- кінець тренування: діалог лишається на екрані, знизу — кнопка нового тренування
+function renderTrainDone(){
+  clearInterval(timerId); $("timer").style.display = "none";
+  const c = $("composer"); if (!c) return;
+  const e = A.eval || {};
+  c.innerHTML = `<div class="info" style="margin-top:8px"><b>Тренування завершено.</b>${e.n ? ` Самостійно: ${e.first || 0} з ${e.n}${e.hinted ? `, з підказкою: ${e.hinted}` : ""}.` : ""}
+    ${e.review && e.review.length ? `<br>Що повторити: ${e.review.map(esc).join("; ")}.` : ""}</div>
+    <div class="row" style="margin-top:10px"><span class="sp"></span><button id="again">Ще одне тренування</button></div>`;
+  $("again").onclick = async () => {
+    $("again").disabled = true; $("again").textContent = "Готуємо нові завдання…";
+    const fsn = await findSession(st.attemptId("ai-"+TID, GROUP || A.group, NAME || A.name));
+    AID = fsn.id; askedAt = 0;
+    A = { topic: "ai-"+TID, t: TID, topics: CFG.topics || [], group: A.group, name: A.name, uid: UID, messages: [], sig: "", done: false, mode: "train",
+          session: AID.includes("__s") ? Number(AID.split("__s").pop()) || 2 : 1,
+          meta: { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [], aiNoticeAccepted: new Date().toISOString(), seed: Math.random().toString(36).slice(2, 12) } };
+    await save(); renderChat(); send(START);
+  };
+  scrollEnd();
 }
 
 // ---------- кінець

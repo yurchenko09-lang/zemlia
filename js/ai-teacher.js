@@ -1,5 +1,7 @@
 import * as st from "./store.js";
-import { WORKER_URL, AI_SUBJECT } from "./ai-config.js";
+import * as AICFG from "./ai-config.js";
+const { WORKER_URL, AI_SUBJECT, EXAM_BANK } = AICFG;
+const TASK_TOPICS = AICFG.TASK_TOPICS || null;   // теми, у яких є практичні задачі
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -54,12 +56,13 @@ function formOf(box){
     open: box.querySelector(".op").checked,
     nq: parseInt(box.querySelector(".nq").value, 10), minutes: parseInt(box.querySelector(".mn").value, 10),
     showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked,
+    mode: box.querySelector(".md").value, kinds: [...box.querySelectorAll(".kd:checked")].map(i => i.value),
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value),
     criteria: [...box.querySelectorAll(".crit tbody tr")].map(tr => ({ name: tr.querySelector(".cn").value.trim(), desc: tr.querySelector(".cd").value.trim(), max: parseInt(tr.querySelector(".cm").value, 10) })).filter(c => c.name)
   };
 }
-const cmpKeys = ["title","topics","open","nq","minutes","showScore","adaptive","groups","criteria"];
-const norm = o => o ? { title: o.title || "", topics: o.topics || [], open: !!o.open, nq: o.nq || 6, minutes: o.minutes ?? 20, showScore: !!o.showScore, adaptive: o.adaptive !== false, groups: o.groups || [],
+const cmpKeys = ["title","topics","open","nq","minutes","showScore","adaptive","mode","kinds","groups","criteria"];
+const norm = o => o ? { title: o.title || "", topics: o.topics || [], open: !!o.open, nq: o.nq || 6, minutes: o.minutes ?? 20, showScore: !!o.showScore, adaptive: o.adaptive !== false, mode: o.mode === "train" ? "train" : "exam", kinds: o.mode === "train" && EXAM_BANK ? (o.kinds && o.kinds.length ? o.kinds : ["task"]) : [], groups: o.groups || [],
   criteria: (o.criteria && o.criteria.length ? o.criteria : DEFAULT_CRITERIA).map(c => ({ name: c.name, desc: c.desc || "", max: Number(c.max) })) } : null;
 const pick = o => { const n = norm(o); return JSON.stringify(cmpKeys.map(k => n ? n[k] : null)); };
 // стан збереженої співбесіди (для огляду і плашки)
@@ -79,11 +82,17 @@ function paintStatus(id){
   const head = !saved ? { label: "Не збережено — студенти поки не можуть зайти", cls: "st-warn" }
     : dirty ? { label: "Є незбережені зміни — натисніть «Зберегти». Зараз діє: " + st0.label.toLowerCase(), cls: "st-warn" } : st0;
   const it = (ok, text, warnOnly) => `<li class="${ok ? "ok" : warnOnly ? "wn" : "no"}">${ok ? "✓" : warnOnly ? "!" : "✗"} ${text}</li>`;
-  const tl = f.topics.length, a = ATT[id];
+  const tl = f.topics.length, a = ATT[id], train = f.mode === "train";
+  box.querySelectorAll(".examonly").forEach(el => el.style.display = train ? "none" : "");
+  box.querySelectorAll(".trainonly").forEach(el => el.style.display = train ? "" : "none");
   const list = [
+    train ? it(true, "Тип: підготовка до екзамену (без оцінки)") : "",
+    train && EXAM_BANK ? it(f.kinds.length > 0, f.kinds.length ? "Завдання: " + f.kinds.map(k => ({ test: "тести", match: "відповідність", task: "задачі" }[k])).join(", ") : "Оберіть види завдань") : "",
     it(!!f.title, f.title ? "Назва вказана" : "Вкажіть назву"),
     it(tl > 0, tl ? `Теми: ${tl}` : "Оберіть хоча б одну тему"),
     it(f.groups.length > 0, f.groups.length ? `Групи: ${f.groups.map(esc).join(", ")}` : "Відмітьте групи"),
+    train && TASK_TOPICS && f.kinds.length === 1 && f.kinds[0] === "task" ? it(f.topics.some(t => TASK_TOPICS.includes(t)), f.topics.some(t => TASK_TOPICS.includes(t)) ? `Тем із задачами: ${f.topics.filter(t => TASK_TOPICS.includes(t)).length}` : "У вибраних темах немає задач — оберіть теми з позначкою «задачі»") : "",
+    train ? it(f.nq >= 3 && f.nq <= 30, `Завдань за одне тренування: ${f.nq}`) :
     tl ? it(f.nq >= tl, f.nq >= tl ? `Питань: ${f.nq} (≈${Math.max(1, Math.floor(f.nq / tl))} на тему)` : `Питань (${f.nq}) менше, ніж тем (${tl}) — частина тем без питань`, true) : "",
     it(f.open, f.open ? "Відмічено «Відкрита»" : "Не відмічено «Відкрита» — студенти побачать «закрита»"),
     it(saved && !dirty, saved && !dirty ? "Збережено" : "Не збережено — натисніть «Зберегти»"),
@@ -106,7 +115,7 @@ function paintOverview(){
   const list = interviews();
   el.innerHTML = list.length ? `<table class="rep"><tr><th>Співбесіда</th><th>Стан</th><th>Групи</th><th>Результати</th></tr>${list.map(([id, c]) => {
     const s = SAVED[id] || c, st0 = stateOf(id), a = ATT[id];
-    return `<tr class="clk" data-act="goto" data-v="${id}"><td><b>${esc(s.title || "без назви")}</b><br><span class="hint">${(s.topics||[]).length} тем · ${s.nq||"?"} питань</span></td>
+    return `<tr class="clk" data-act="goto" data-v="${id}"><td><b>${esc(s.title || "без назви")}</b><br><span class="hint">${s.mode === "train" ? `підготовка · ${(s.topics||[]).length} тем · ${s.nq||10} завдань` : `${(s.topics||[]).length} тем · ${s.nq||"?"} питань`}</span></td>
       <td><span class="pill ${st0.cls}">${esc(st0.label)}</span></td><td>${(s.groups||[]).map(esc).join(", ") || '<span class="bad">не вибрано</span>'}</td>
       <td>${a ? `${a.done} завершили${a.prog ? ` · ${a.prog} в процесі` : ""}` : (st0.key === "new" ? "—" : "…")}</td></tr>`; }).join("")}</table>` : "";
 }
@@ -131,19 +140,22 @@ function renderSetup(){
         <div class="row">${c.unsaved ? '<span class="hint">Посилання з\'явиться після збереження</span>' : `<code>${esc(link(id))}</code><button class="sm sec" data-act="copy" data-v="${esc(link(id))}">Копіювати</button>`}<span class="sp"></span><span class="boxmsg"></span></div>
         <details class="ivform" data-f="${id}" ${!sv || EDIT.has(id) ? "open" : ""}><summary>Налаштування співбесіди</summary>
         <div class="lockmsg"></div>
+        <label>Тип</label><select class="md" style="width:auto"><option value="exam" ${c.mode !== "train" ? "selected" : ""}>Співбесіда — оцінювання знань</option><option value="train" ${c.mode === "train" ? "selected" : ""}>Підготовка до екзамену — пояснення і підказки, без оцінки</option></select>
+        <div class="trainonly hint" style="margin-top:4px">ШІ дає завдання${EXAM_BANK ? " з банку екзаменаційних тестів і задач" : " за лекціями обраних тем"}, підказує, підводить до правильної відповіді і пояснює її. Студент може тренуватися скільки завгодно разів, щоразу з новими завданнями.</div>
+        ${EXAM_BANK ? `<div class="trainonly"><span class="hint">Завдання: </span>${[["test","тести (одна відповідь)"],["match","на відповідність"],["task","задачі"]].map(([k,l]) => `<label class="chk"><input type="checkbox" class="kd" value="${k}" ${(c.kinds && c.kinds.length ? c.kinds.includes(k) : k === "task") ? "checked" : ""}> ${l}</label>`).join("")}</div>` : ""}
         <label>Назва</label><input type="text" class="ti" value="${esc(c.title||"")}" placeholder="Напр., Тематична: Літосфера і ґрунти (теми 9–12)">
         <label>Теми</label>
         <div>${COURSE.sections.map(sec => { const ts = sec.topics.filter(t => t.ready); return ts.length ? `<div class="hint" style="margin-top:6px">${esc(sec.title)}</div>${ts.map(t =>
-          `<label class="chk"><input type="checkbox" class="tc" value="${t.id}" ${c.topics.includes(t.id)?'checked':''}> ${t.num}. ${esc(t.title.length > 70 ? t.title.slice(0,70) + "…" : t.title)}</label>`).join("")}` : ""; }).join("")}</div>
+          `<label class="chk"><input type="checkbox" class="tc" value="${t.id}" ${c.topics.includes(t.id)?'checked':''}> ${t.num}. ${esc(t.title.length > 70 ? t.title.slice(0,70) + "…" : t.title)}${TASK_TOPICS && TASK_TOPICS.includes(t.id) ? ' <span class="pill st-ok trainonly">задачі</span>' : ""}</label>`).join("")}` : ""; }).join("")}</div>
         <div class="row" style="margin-top:10px">
           <label class="chk"><input type="checkbox" class="op" ${c.open?'checked':''}> Відкрита</label>
-          <span class="hint">Питань:</span><input type="text" class="nq num" value="${esc(c.nq||6)}" inputmode="numeric">
+          <span class="hint"><span class="examonly">Питань:</span><span class="trainonly">Завдань:</span></span><input type="text" class="nq num" value="${esc(c.nq || (c.mode === "train" ? 10 : 6))}" inputmode="numeric">
           <span class="hint">Час, хв (0 — без обмеження):</span><input type="text" class="mn num" value="${esc(c.minutes ?? 20)}" inputmode="numeric">
-          <label class="chk"><input type="checkbox" class="ss" ${c.showScore?'checked':''}> Показувати студенту бал ШІ</label>
-          <label class="chk" title="ШІ починає з простих питань, ускладнює для сильних, а слабшим дає одне спрощення (навідне питання або 3 варіанти). Спрощення знижують бал."><input type="checkbox" class="ad" ${c.adaptive !== false ? 'checked' : ''}> Адаптивна складність</label>
+          <label class="chk examonly"><input type="checkbox" class="ss" ${c.showScore?'checked':''}> Показувати студенту бал ШІ</label>
+          <label class="chk examonly" title="ШІ починає з простих питань, ускладнює для сильних, а слабшим дає одне спрощення (навідне питання або 3 варіанти). Спрощення знижують бал."><input type="checkbox" class="ad" ${c.adaptive !== false ? 'checked' : ''}> Адаптивна складність</label>
         </div>
         <div><span class="hint">Групи: </span>${G.map(g=>`<label class="chk"><input type="checkbox" class="gr" value="${esc(g)}" ${(c.groups||[]).includes(g)?'checked':''}> ${esc(g)}</label>`).join("") || '<span class="hint">спершу додайте групи в основному кабінеті</span>'}</div>
-        <details class="cfg"><summary>Критерії оцінювання (разом ${sum} б.)</summary>
+        <details class="cfg examonly"><summary>Критерії оцінювання (разом ${sum} б.)</summary>
           <table class="rep crit" style="margin-top:6px"><thead><tr><th>Критерій</th><th>Що оцінюється</th><th>Макс</th><th></th></tr></thead><tbody>${critRows(crit)}</tbody></table>
           <div class="row" style="margin-top:6px"><button class="sm sec" data-act="addCrit">+ критерій</button><button class="sm sec" data-act="resetCrit">Стандартні</button></div>
         </details>
@@ -158,7 +170,7 @@ function renderSetup(){
 // Коли співбесіду вже хтось проходить, зміст (теми, кількість питань, критерії) змінювати не можна:
 // інакше студенти отримають різні питання й оцінюватимуться за різними правилами.
 // Можна: відкрити/закрити, групи, час, показ балу. Для іншого змісту — «Копія».
-const isLocked = id => { const a = ATT[id]; return !!(SAVED[id] && !SAVED[id].unsaved && a && (a.done + a.prog) > 0); };
+const isLocked = id => { if ((SAVED[id] || {}).mode === "train") return false; const a = ATT[id]; return !!(SAVED[id] && !SAVED[id].unsaved && a && (a.done + a.prog) > 0); };
 function applyLock(id){
   const box = document.querySelector(`.tp[data-t="${id}"]`); if (!box) return;
   const lock = isLocked(id);
@@ -182,15 +194,19 @@ async function saveTopic(id){
   const title = box.querySelector(".ti").value.trim();
   if (!title) { boxMsg(id, "Вкажіть назву співбесіди — її бачитимуть студенти."); return; }
   if (!topics.length) { boxMsg(id, "Оберіть хоча б одну тему."); return; }
-  if (topics.length > MAX_TOPICS) { boxMsg(id, `Не більше ${MAX_TOPICS} тем в одній співбесіді.`); return; }
+  const mode = box.querySelector(".md").value, train = mode === "train";
+  const kinds = [...box.querySelectorAll(".kd:checked")].map(i => i.value);
+  if (!train && topics.length > MAX_TOPICS) { boxMsg(id, `Не більше ${MAX_TOPICS} тем в одній співбесіді (для підготовки — без обмежень).`); return; }
+  if (train && EXAM_BANK && !kinds.length) { boxMsg(id, "Оберіть хоча б один вид завдань."); return; }
   if (!crit.length) { boxMsg(id, "Потрібен хоча б один критерій."); return; }
   if (crit.some(c => !(c.max >= 1 && c.max <= 100))) { boxMsg(id, "Максимальний бал критерію — ціле число від 1 до 100."); return; }
   if (new Set(crit.map(c=>c.name)).size !== crit.length) { boxMsg(id, "Назви критеріїв не повинні повторюватися."); return; }
   const nq = parseInt(box.querySelector(".nq").value, 10), mn = parseInt(box.querySelector(".mn").value, 10);
-  if (!(nq >= 3 && nq <= 12)) { boxMsg(id, "Кількість питань — від 3 до 12."); return; }
+  if (train ? !(nq >= 3 && nq <= 30) : !(nq >= 3 && nq <= 12)) { boxMsg(id, train ? "Кількість завдань — від 3 до 30." : "Кількість питань — від 3 до 12."); return; }
   if (!(mn >= 0 && mn <= 180)) { boxMsg(id, "Час — від 0 до 180 хвилин."); return; }
-  if (nq < topics.length) { if (!confirm(`Тем (${topics.length}) більше, ніж питань (${nq}) — деякі теми залишаться без питання. Зберегти так?`)) return; }
+  if (!train && nq < topics.length) { if (!confirm(`Тем (${topics.length}) більше, ніж питань (${nq}) — деякі теми залишаться без питання. Зберегти так?`)) return; }
   SETTINGS.ai[id] = { title, topics, open: box.querySelector(".op").checked, nq, minutes: mn, showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked,
+    mode, ...(train && EXAM_BANK ? { kinds } : {}),
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value), criteria: crit, created: (SETTINGS.ai[id] && SETTINGS.ai[id].created) || Date.now() };
   await st.saveSettings(SETTINGS); snap(); render(); boxMsg(id, "Збережено ✓ Зміни діють приблизно за 30 секунд.", false);
 }
@@ -242,8 +258,8 @@ function suspect(v){
   const s = String(v||"").toLowerCase();
   return s.startsWith("вис") ? '<span class="pill p-hi">висока</span>' : s.startsWith("сер") ? '<span class="pill p-mid">середня</span>' : s.startsWith("низ") ? '<span class="pill p-lo">низька</span>' : '<span class="hint">—</span>';
 }
-const nqOf = r => (SETTINGS.ai[r.t] || {}).nq || 6;
-function asked(r){ return (r.messages||[]).filter(m => m.role === "assistant" && /Питання\s+\d+\s+з\s+\d+/.test(m.content)).length; }
+const nqOf = r => (SETTINGS.ai[r.t] || {}).nq || ((SETTINGS.ai[r.t] || {}).mode === "train" ? 10 : 6);
+function asked(r){ return (r.messages||[]).filter(m => m.role === "assistant" && /(Питання|Завдання)\s+\d+\s+з\s+\d+/.test(m.content)).length; }
 function duration(r){ const a = r.meta && r.meta.startedAt, b = (r.meta && r.meta.finishedAt) || r.updatedAt; return a && b ? (new Date(b) - new Date(a)) / 1000 : 0; }
 function avgSecs(r){ const s = (r.meta && r.meta.secs) || []; return s.length ? s.reduce((x,y)=>x+y,0) / s.length : 0; }
 
@@ -275,6 +291,7 @@ function allRows(){
     .sort((x, y) => x.group.localeCompare(y.group, "uk", { numeric: true }) || x.name.localeCompare(y.name, "uk"));
 }
 function renderResults(){
+  if ((SAVED[SEL.topic] || {}).mode === "train") return renderTrainResults();
   const list = interviews();
   if (SEL.topic && !list.some(([id]) => id === SEL.topic)) list.push([SEL.topic, { title: "(видалена співбесіда)" }]);
   const cfg = SAVED[SEL.topic] || {};
@@ -309,6 +326,73 @@ function renderResults(){
   if (SEL.id) { const d = document.getElementById("p-" + SEL.id); if (d) { d.open = true; COLLAPSED.delete(SEL.id); d.scrollIntoView({ behavior: "smooth", block: "start" }); } SEL.id = ""; }
 }
 let COLLAPSED = new Set(), ROSTER = {};
+// ---------- результати підготовки: по студенту — кількість тренувань і сума за всі
+function renderTrainResults(){
+  const list = interviews(), cfg = SAVED[SEL.topic] || {};
+  const groups = [...new Set([...(cfg.groups || []), ...ROWS.map(r => r.group)])];
+  const key = (g, n) => g + "|" + normN(n);
+  const by = new Map();
+  ROWS.forEach(r => { const k = key(r.group, r.name); if (!by.has(k)) by.set(k, { group: r.group, name: r.name, att: [] }); by.get(k).att.push(r); });
+  (cfg.groups || []).forEach(g => (ROSTER[g] || []).forEach(n => { const k = key(g, n); if (!by.has(k)) by.set(k, { group: g, name: n, att: [] }); }));
+  const studs = [...by.values()].filter(x => !SEL.group || x.group === SEL.group)
+    .sort((x, y) => x.group.localeCompare(y.group, "uk", { numeric: true }) || x.name.localeCompare(y.name, "uk"));
+  const sumOf = att => att.reduce((a, r) => { const e = r.eval || {}; if (r.done) { a.done++; a.n += e.n || 0; a.first += e.first || 0; a.hinted += e.hinted || 0; a.shown += e.shown || 0; } else a.prog++; return a; }, { done: 0, prog: 0, n: 0, first: 0, hinted: 0, shown: 0 });
+  const pct = (x, n) => n ? Math.round(100 * x / n) + "%" : "—";
+  const gsum = groups.filter(g => !SEL.group || g === SEL.group).map(g => {
+    const ss = studs.filter(x => x.group === g), active = ss.filter(x => x.att.length).length;
+    return `<div class="gsum"><b>${esc(g)}</b> <span class="pill st-ok">${active} тренувалися</span>${ROSTER[g] ? ` <span class="pill st-off">${ss.length - active} ще ні</span>` : ' <span class="hint">(списку групи немає — видно лише тих, хто заходив)</span>'}</div>`;
+  }).join("");
+  const att = studs.flatMap(x => x.att);
+  $("app").innerHTML = tabs() + `<div class="card">
+    <div class="row"><select id="selT" style="width:auto;flex:1;min-width:240px"><option value="">— співбесіда —</option>${list.map(([id,c])=>`<option value="${id}" ${SEL.topic===id?'selected':''}>${esc(c.title||"без назви")}${c.mode === "train" ? " (підготовка)" : ""}</option>`).join("")}</select>
+      <select id="selG" style="width:auto"><option value="">Усі групи</option>${groups.map(g=>`<option ${SEL.group===g?'selected':''}>${esc(g)}</option>`).join("")}</select>
+      <button class="sec sm" data-act="reload">Оновити</button><button class="sec sm" data-act="csvTrain" ${att.length?'':'disabled'}>CSV</button><button class="sec sm" data-act="json" ${att.length?'':'disabled'}>JSON (протоколи)</button></div>
+    <p class="hint" style="margin:10px 0 4px">Підготовка без оцінки. «Самостійно» — частка завдань, на які студент відповів правильно з першої спроби, за всі тренування.</p>
+    <div>${gsum}</div>
+    ${studs.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Тренувань</th><th>Завдань</th><th>Самостійно</th><th>З підказкою</th><th>Показано відповідь</th><th>Повторити (останнє тренування)</th><th>Останнє</th></tr></thead><tbody>
+      ${studs.map(x => { if (!x.att.length) return `<tr class="none"><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td><span class="pill st-off">не тренувався</span></td><td colspan="6"></td></tr>`;
+        const t = sumOf(x.att), last = [...x.att].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))[0], le = last.eval || {};
+        return `<tr class="clk" data-act="open" data-v="${esc(last.id)}"><td>${esc(x.name)}</td><td>${esc(x.group)}</td>
+          <td>${t.done}${t.prog ? ` <span class="pill st-warn">+${t.prog} в процесі</span>` : ""}</td><td>${t.n || "—"}</td>
+          <td><b>${pct(t.first, t.n)}</b> <span class="hint">${t.n ? `(${t.first})` : ""}</span></td><td>${t.n ? t.hinted : "—"}</td><td>${t.n ? t.shown : "—"}</td>
+          <td>${(le.review || []).map(esc).join("; ") || "—"}</td><td>${last.updatedAt ? new Date(last.updatedAt).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" }) : ""}</td></tr>`; }).join("")}
+      </tbody></table></div>` : '<p class="hint" style="margin-top:12px">Ще ніхто не тренувався.</p>'}
+  </div>
+  ${att.length ? `<div class="card"><div class="row"><h3 style="margin:0">Протоколи тренувань (${att.length})</h3><span class="sp"></span><button class="sm sec" data-act="expandAll">Розгорнути всі</button><button class="sm sec" data-act="collapseAll">Згорнути всі</button></div>
+    ${studs.flatMap(x => [...x.att].sort((a, b) => (a.session || 1) - (b.session || 1))).map(r => { const e = r.eval || {};
+      return `<details class="proto" id="p-${esc(r.id)}" ${COLLAPSED.has(r.id) ? "" : "open"} data-pid="${esc(r.id)}"><summary><b>${esc(r.name)}</b> · ${esc(r.group)} · тренування № ${r.session || 1}
+        ${r.done ? `<span class="pill st-ok">завершено</span> самостійно ${e.first || 0} з ${e.n || "?"}` : `<span class="pill st-warn">в процесі · завдання ${asked(r)} з ${nqOf(r)}</span>`}</summary>${trainDetail(r)}</details>`; }).join("")}</div>` : ""}`;
+  $("selT").onchange = async e => { SEL = { topic: e.target.value, group: "", id: "" }; await loadRows(); render(); };
+  $("selG").onchange = e => { SEL.group = e.target.value; SEL.id = ""; render(); };
+  document.querySelectorAll("details.proto").forEach(d => d.addEventListener("toggle", () => { d.open ? (OPENED_TRAIN.add(d.dataset.pid), COLLAPSED.delete(d.dataset.pid)) : (OPENED_TRAIN.delete(d.dataset.pid), COLLAPSED.add(d.dataset.pid)); }));
+  if (SEL.id) { const d = document.getElementById("p-" + SEL.id); if (d) { d.open = true; OPENED_TRAIN.add(SEL.id); d.scrollIntoView({ behavior: "smooth", block: "start" }); } SEL.id = ""; }
+}
+let OPENED_TRAIN = new Set();
+function trainDetail(r){
+  const e = r.eval || null, secs = (r.meta && r.meta.secs) || [];
+  let ui = 0;
+  const st2 = { "сам": "✓ сам", "підказка": "з підказкою", "показано": "показано відповідь", "пропущено": "пропущено" };
+  return `<div class="pbody">
+    ${e ? `<p>${(e.items || []).map(x => `<span class="pill ${x.status === "сам" ? "p-lo" : x.status === "підказка" ? "p-mid" : "p-hi"}">${x.n}: ${st2[x.status] || x.status}</span>`).join(" ")}</p>
+      ${e.review && e.review.length ? `<p><b>Повторити:</b> ${e.review.map(esc).join("; ")}</p>` : ""}
+      ${e.summary ? `<p><b>Коментар ШІ:</b> ${esc(e.summary)}</p>` : ""}` : `<p class="hint">Тренування ще не завершене.</p>`}
+    <p class="hint">Тривалість: ${fmt(duration(r))}</p>
+    ${(r.messages||[]).slice(1).map(m => m.role === "user"
+        ? `<div class="msg me">${esc(m.content)}${secs[ui] != null ? `<small>${fmt(secs[ui++])}</small>` : ""}</div>`
+        : `<div class="msg ai">${esc(m.content.split(/<eval>/i)[0].trim() || "(підсумок — вище)")}</div>`).join("")}
+    <div class="row" style="margin-top:12px"><span class="sp"></span>
+      ${!r.done && r.uid ? `<button class="sm sec" data-act="unbind" data-v="${esc(r.id)}">Дозволити продовжити з іншого пристрою</button>` : ""}
+      <button class="sm sec" data-act="del" data-v="${esc(r.id)}">Видалити це тренування</button></div>
+  </div>`;
+}
+function exportTrainCsv(){
+  const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+  const rows = ROWS.filter(r => !SEL.group || r.group === SEL.group);
+  const head = ["Група","Студент","Тренування №","Стан","Завдань","Самостійно","З підказкою","Показано","Пропущено","Повторити","Дата"];
+  const lines = rows.sort((a, b) => a.group.localeCompare(b.group, "uk") || a.name.localeCompare(b.name, "uk") || (a.session || 1) - (b.session || 1)).map(r => { const e = r.eval || {};
+    return [r.group, r.name, r.session || 1, r.done ? "завершено" : "в процесі", e.n ?? "", e.first ?? "", e.hinted ?? "", e.shown ?? "", e.skipped ?? "", (e.review || []).join("; "), r.updatedAt || ""].map(q).join(";"); });
+  download(`pidgotovka_${SEL.topic}${SEL.group?"_"+SEL.group:""}.csv`, "\ufeff" + [head.map(q).join(";"), ...lines].join("\r\n"), "text/csv;charset=utf-8");
+}
 function detailHtml(r){
   const e = r.eval || evalFromText(r), secs = (r.meta && r.meta.secs) || [];
   let ui = 0;
@@ -380,6 +464,12 @@ function exportJson(){
 
 // ---------- події
 ["input","change"].forEach(t => document.addEventListener(t, ev => { const b = ev.target.closest && ev.target.closest(".tp[data-t]"); if (b) paintStatus(b.dataset.t); }));
+// новий тип «підготовка»: без обмеження часу і 10 завдань за замовчуванням
+document.addEventListener("change", ev => {
+  if (!ev.target.classList || !ev.target.classList.contains("md")) return;
+  const b = ev.target.closest(".tp[data-t]"), tr = ev.target.value === "train";
+  b.querySelector(".mn").value = tr ? 0 : 20; b.querySelector(".nq").value = tr ? (EXAM_BANK ? 5 : 10) : 6; paintStatus(b.dataset.t);
+});
 document.addEventListener("click", async ev => {
   const el = ev.target.closest("[data-act]"); if (!el) return;
   const act = el.dataset.act, v = el.dataset.v;
@@ -412,6 +502,7 @@ document.addEventListener("click", async ev => {
     else if (act === "expandAll") { COLLAPSED.clear(); document.querySelectorAll("details.proto").forEach(d => d.open = true); }
     else if (act === "collapseAll") { document.querySelectorAll("details.proto").forEach(d => { d.open = false; COLLAPSED.add(d.dataset.pid); }); }
     else if (act === "csv") exportCsv();
+    else if (act === "csvTrain") exportTrainCsv();
     else if (act === "json") exportJson();
     else if (act === "unbind") { await st.updateAttempt(v, { uid: null }); warn("Тепер студент може продовжити з іншого пристрою."); await loadRows(); render(); }
     else if (act === "del") {
