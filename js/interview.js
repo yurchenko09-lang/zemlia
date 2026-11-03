@@ -106,7 +106,7 @@ async function login(){
   if (A && A.done) { renderDone(); return; }
   if (!A) {
     A = { topic: "ai-"+TID, t: TID, topics: CFG.topics || [], group: g, name: n, uid: UID, messages: [], sig: "", done: false,
-          meta: { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [], aiNoticeAccepted: new Date().toISOString() } };
+          meta: { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [], aiNoticeAccepted: new Date().toISOString(), seed: Math.random().toString(36).slice(2, 12) } };
   }
   A.uid = UID; A.meta ||= { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [] };
   await save();
@@ -181,7 +181,7 @@ async function send(text, finish = false){
   try {
     const r = await fetch(WORKER_URL.replace(/\/$/,"") + "/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: TID, sid: AID, messages: A.messages, sig: A.sig, finish: finish || timeIsUp() })
+      body: JSON.stringify({ topic: TID, sid: AID, seed: A.meta.seed || "", messages: A.messages, sig: A.sig, finish: finish || timeIsUp() })
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(d.error || ("Помилка " + r.status)), { status: r.status });

@@ -227,7 +227,7 @@ async function verify(r){
   if (!r.messages || r.messages.length < 2 || !r.sig) { VER[r.id] = "none"; return; }
   try {
     const res = await fetch(WORKER_URL.replace(/\/$/,"") + "/verify", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: r.t, sid: r.id, messages: r.messages, sig: r.sig, eval: r.done ? (r.eval ?? null) : null }) }).then(x => x.json());
+      body: JSON.stringify({ topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.done ? (r.eval ?? null) : null }) }).then(x => x.json());
     VER[r.id] = res.ok ? "ok" : "bad";
   } catch(e){ VER[r.id] = "err"; }
   if (TAB === "results") paintVer(r.id);
