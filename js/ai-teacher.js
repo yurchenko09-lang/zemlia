@@ -12,7 +12,7 @@ const DEFAULT_CRITERIA = [
   { name: "Застосування", desc: "наводить власні приклади, переносить знання на нову ситуацію, зокрема на Україну", max: 3 },
   { name: "Самостійність", desc: "відповідає своїми словами, аргументує, справляється з уточнювальними питаннями", max: 2 }
 ];
-let COURSE, SETTINGS, TAB = "setup", ROWS = [], SEL = { topic: "", group: "", id: "" }, VER = {};
+let COURSE, SETTINGS, TAB = "setup", ROWS = [], SEL = { topic: "", group: "", id: "" }, VER = {}, OVL = {};
 
 let warnT = null;
 function warn(m){ const a=$("alert"); a.innerHTML=m; a.classList.add("show"); clearTimeout(warnT); warnT = setTimeout(()=>a.classList.remove("show"), 8000); }
@@ -236,8 +236,38 @@ async function deleteInterview(id){
 async function loadRows(){
   ROWS = SEL.topic ? await st.listAttempts("ai-" + SEL.topic) : [];
   ROWS.sort((a,b) => a.group.localeCompare(b.group, "uk") || a.name.localeCompare(b.name, "uk"));
-  VER = {};
-  if (workerReady()) ROWS.forEach(r => verify(r));
+  VER = {}; OVL = {};
+  if (workerReady()) {
+    ROWS.forEach(r => verify(r));
+    if ((SAVED[SEL.topic] || {}).mode !== "train") loadOverlaps();
+  }
+}
+// збіг відповідей з текстом лекції: рахує воркер (без ШІ), щоб студент не міг підправити результат
+async function loadOverlaps(){
+  const topic = SEL.topic;
+  await Promise.all(ROWS.filter(r => (r.messages || []).length > 2).map(async r => {
+    try {
+      const d = await fetch(WORKER_URL.replace(/\/$/,"") + "/overlap", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, messages: (r.messages || []).map(m => ({ role: m.role, content: m.content })) }) }).then(x => x.json());
+      OVL[r.id] = d.answers || [];
+    } catch(e){ OVL[r.id] = null; }
+  }));
+  if (TAB === "results" && SEL.topic === topic) render();
+}
+function ovlSummary(id){
+  const a = OVL[id];
+  if (a === undefined) return '<span class="hint">…</span>';
+  if (!a || !a.length) return '<span class="hint">—</span>';
+  const words = a.reduce((x, y) => x + y.words, 0), cov = a.reduce((x, y) => x + y.words * y.pct / 100, 0);
+  const pct = words ? Math.round(100 * cov / words) : 0, longest = Math.max(...a.map(x => x.longest)), flag = a.some(x => x.flag);
+  return `<span class="pill ${flag ? "p-hi" : pct >= 20 ? "p-mid" : "p-lo"}" title="Частка слів у відповідях, дослівно взятих з лекції фразами від 5 слів; найдовший дослівний фрагмент">${flag ? "⚠ " : ""}${pct} %</span>${longest ? ` <span class="hint">до ${longest} сл.</span>` : ""}`;
+}
+// підсвітити дослівно переписані з лекції фрагменти у відповіді студента
+function markCopied(text, o){
+  if (!o || !o.spans || !o.spans.length) return esc(text);
+  let out = "", pos = 0;
+  o.spans.forEach(([a, b]) => { out += esc(text.slice(pos, a)) + `<mark class="cp">${esc(text.slice(a, b))}</mark>`; pos = b; });
+  return out + esc(text.slice(pos));
 }
 async function verify(r){
   if (!r.messages || r.messages.length < 2 || !r.sig) { VER[r.id] = "none"; return; }
@@ -308,11 +338,11 @@ function renderResults(){
     <div class="row"><select id="selT" style="width:auto;flex:1;min-width:240px"><option value="">— співбесіда —</option>${list.map(([id,c])=>`<option value="${id}" ${SEL.topic===id?'selected':''}>${esc(c.title||"без назви")}</option>`).join("")}</select>
       <select id="selG" style="width:auto"><option value="">Усі групи</option>${groups.map(g=>`<option ${SEL.group===g?'selected':''}>${esc(g)}</option>`).join("")}</select>
       <button class="sec sm" data-act="reload">Оновити</button><button class="sec sm" data-act="csv" ${att.length?'':'disabled'}>CSV</button><button class="sec sm" data-act="json" ${att.length?'':'disabled'}>JSON (протоколи)</button></div>
-    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th title="Найвищий рівень, на якому студент упевнено відповідав сам · кількість спрощень">Рівень · спрощень</th><th>Підозра ШІ</th><th title="Перемикання вкладок">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th></tr></thead><tbody>
-      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="8"></td></tr>`;
+    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th title="Найвищий рівень, на якому студент упевнено відповідав сам · кількість спрощень">Рівень · спрощень</th><th>Підозра ШІ</th><th title="Дослівний збіг відповідей з текстом лекції">Збіг з лекцією</th><th title="Перемикання вкладок">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th></tr></thead><tbody>
+      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="9"></td></tr>`;
         const e = r.eval || evalFromText(r) || {}; return `<tr class="clk" data-act="open" data-v="${esc(r.id)}">
         <td>${esc(r.name)}</td><td>${esc(r.group)}</td><td><span class="pill ${s0.cls}">${esc(s0.label)}</span></td>
-        <td>${e.max ? `<b>${e.total}</b> / ${e.max}` : "—"}</td><td>${lvl(e)}</td><td>${e.ai_suspect ? suspect(e.ai_suspect) : "—"}</td>
+        <td>${e.max ? `<b>${e.total}</b> / ${e.max}` : "—"}</td><td>${lvl(e)}</td><td>${e.ai_suspect ? suspect(e.ai_suspect) : "—"}</td><td>${ovlSummary(r.id)}</td>
         <td>${(r.meta&&r.meta.blur)||0}</td><td>${(r.meta&&r.meta.pastes)||0}</td><td>${fmt(avgSecs(r))}</td><td>${fmt(duration(r))}</td>
         <td data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</td></tr>`; }).join("")}
       </tbody></table></div>` : '<p class="hint" style="margin-top:12px">Ще ніхто не проходив цю співбесіду, а списків груп немає.</p>') : `<p class="hint" style="margin-top:12px">Оберіть співбесіду.</p>`}
@@ -396,6 +426,7 @@ function exportTrainCsv(){
 function detailHtml(r){
   const e = r.eval || evalFromText(r), secs = (r.meta && r.meta.secs) || [];
   let ui = 0;
+  const ov = {}; (OVL[r.id] || []).forEach(o => ov[o.i] = o);
   return `<div class="pbody">
     <div class="row"><span class="sp"></span><span data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</span></div>
     ${e ? `${e.error ? '<div class="alert show">ШІ не зміг коректно сформувати оцінку — оцініть за протоколом вручну.</div>' : ""}
@@ -408,8 +439,9 @@ function detailHtml(r){
     <p class="hint">Вкладки: ${(r.meta&&r.meta.blur)||0} · Спроби вставки: ${(r.meta&&r.meta.pastes)||0} · Тривалість: ${fmt(duration(r))}${r.meta&&r.meta.aiNoticeAccepted ? ` · Попередження про ШІ прийнято: ${new Date(r.meta.aiNoticeAccepted).toLocaleString("uk-UA")}` : ""}</p>
     ${r.evalPrev && r.eval ? `<p class="hint">Переоцінено ${r.regradedAt ? new Date(r.regradedAt).toLocaleString("uk-UA") : ""}: спершу було <b>${r.evalPrev.total} / ${r.evalPrev.max}</b>.</p>` : ""}
     ${e && !r.eval ? '<div class="info">Оцінку відновлено з тексту діалогу (стара версія воркера). Протокол не завершено — за потреби дозвольте пройти заново.</div>' : ""}
-    ${(r.messages||[]).slice(1).map(m => m.role === "user"
-        ? `<div class="msg me">${esc(m.content)}${secs[ui] != null ? `<small>${fmt(secs[ui++])} · ${m.content.length} симв.</small>` : ""}</div>`
+    ${OVL[r.id] && OVL[r.id].some(o => o.pct) ? '<p class="hint">Жовтим підсвічено фрагменти, дослівно (від 5 слів поспіль) збіжні з текстом лекції. Окремі терміни й визначення — нормально; ⚠ — відповідь значною мірою переписана.</p>' : ""}
+    ${(r.messages||[]).map((m, mi) => mi === 0 ? "" : m.role === "user"
+        ? `<div class="msg me">${markCopied(m.content, ov[mi])}${secs[ui] != null || (ov[mi] && ov[mi].pct) ? `<small>${secs[ui] != null ? `${fmt(secs[ui++])} · ` : ""}${m.content.length} симв.${ov[mi] && ov[mi].pct ? ` · збіг з лекцією ${ov[mi].pct} %, до ${ov[mi].longest} слів поспіль${ov[mi].src ? " (" + esc(ov[mi].src) + ")" : ""}${ov[mi].flag ? " ⚠" : ""}` : ""}</small>` : ""}</div>`
         : `<div class="msg ai">${esc(m.content.split(/<eval>/i)[0].trim() || "(оцінка — вище)")}</div>`).join("")}
     <div class="row" style="margin-top:12px"><span class="sp"></span>
       ${!r.done && r.uid ? `<button class="sm sec" data-act="unbind" data-v="${esc(r.id)}">Дозволити продовжити з іншого пристрою</button>` : ""}
@@ -449,10 +481,10 @@ function exportCsv(){
   const rows = ROWS.filter(r => !SEL.group || r.group === SEL.group);
   const crit = [...new Set(rows.flatMap(r => ((r.eval||{}).criteria||[]).map(c => c.name)))];
   const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
-  const head = ["Група","Студент","Стан","Бал","Макс",...crit,"Рівень","Спрощень","Підозра ШІ","Вкладки","Вставки","Сер. час відповіді, с","Тривалість, с","Протокол","Підсумок"];
+  const head = ["Група","Студент","Стан","Бал","Макс",...crit,"Рівень","Спрощень","Підозра ШІ","Макс. збіг з лекцією, %","Вкладки","Вставки","Сер. час відповіді, с","Тривалість, с","Протокол","Підсумок"];
   const lines = rows.map(r => { const e = r.eval || {}; return [r.group, r.name, r.done?"завершено":"в процесі", e.total ?? "", e.max ?? "",
     ...crit.map(n => { const c = (e.criteria||[]).find(x => x.name === n); return c ? c.score : ""; }),
-    e.level || "", e.hints ?? "", e.ai_suspect || "", (r.meta&&r.meta.blur)||0, (r.meta&&r.meta.pastes)||0, Math.round(avgSecs(r)), Math.round(duration(r)),
+    e.level || "", e.hints ?? "", e.ai_suspect || "", OVL[r.id] && OVL[r.id].length ? Math.max(...OVL[r.id].map(x => x.pct)) : "", (r.meta&&r.meta.blur)||0, (r.meta&&r.meta.pastes)||0, Math.round(avgSecs(r)), Math.round(duration(r)),
     VER[r.id] === "ok" ? "ок" : VER[r.id] === "bad" ? "змінено" : "", e.summary || ""].map(q).join(";"); });
   download(`spivbesida_${SEL.topic}${SEL.group?"_"+SEL.group:""}.csv`, "﻿" + [head.map(q).join(";"), ...lines].join("\r\n"), "text/csv;charset=utf-8");
 }
