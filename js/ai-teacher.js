@@ -42,7 +42,7 @@ function render(){ TAB === "setup" ? renderSetup() : renderResults(); }
 
 // ---------- налаштування
 function critRows(list){
-  return list.map(c => `<tr><td><input type="text" class="cn" value="${esc(c.name)}"></td><td><input type="text" class="cd" value="${esc(c.desc||"")}"></td>
+  return list.map(c => `<tr><td><input type="text" class="crn" value="${esc(c.name)}"></td><td><input type="text" class="cd" value="${esc(c.desc||"")}"></td>
     <td><input type="text" class="cm num" value="${esc(c.max)}" inputmode="numeric"></td><td><button class="sm sec" data-act="delCrit">✕</button></td></tr>`).join("");
 }
 const MAX_TOPICS = 6;
@@ -58,7 +58,7 @@ function formOf(box){
     showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked,
     mode: box.querySelector(".md").value, kinds: [...box.querySelectorAll(".kd:checked")].map(i => i.value),
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value),
-    criteria: [...box.querySelectorAll(".crit tbody tr")].map(tr => ({ name: tr.querySelector(".cn").value.trim(), desc: tr.querySelector(".cd").value.trim(), max: parseInt(tr.querySelector(".cm").value, 10) })).filter(c => c.name)
+    criteria: [...box.querySelectorAll(".crit tbody tr")].map(tr => ({ name: tr.querySelector(".crn").value.trim(), desc: tr.querySelector(".cd").value.trim(), max: parseInt(tr.querySelector(".cm").value, 10) })).filter(c => c.name)
   };
 }
 const cmpKeys = ["title","topics","open","nq","minutes","showScore","adaptive","mode","kinds","groups","criteria"];
@@ -188,7 +188,7 @@ async function newInterview(){
 async function saveTopic(id){
   const box = document.querySelector(`.tp[data-t="${id}"]`);
   const crit = [...box.querySelectorAll(".crit tbody tr")].map(tr => ({
-    name: tr.querySelector(".cn").value.trim(), desc: tr.querySelector(".cd").value.trim(), max: parseInt(tr.querySelector(".cm").value, 10)
+    name: tr.querySelector(".crn").value.trim(), desc: tr.querySelector(".cd").value.trim(), max: parseInt(tr.querySelector(".cm").value, 10)
   })).filter(c => c.name);
   const topics = [...box.querySelectorAll(".tc:checked")].map(i => i.value);
   const title = box.querySelector(".ti").value.trim();
