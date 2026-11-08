@@ -55,14 +55,14 @@ function formOf(box){
     topics: [...box.querySelectorAll(".tc:checked")].map(i => i.value),
     open: box.querySelector(".op").checked,
     nq: parseInt(box.querySelector(".nq").value, 10), minutes: parseInt(box.querySelector(".mn").value, 10),
-    showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked,
+    showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked, annul: box.querySelector(".an").checked,
     mode: box.querySelector(".md").value, kinds: [...box.querySelectorAll(".kd:checked")].map(i => i.value),
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value),
     criteria: [...box.querySelectorAll(".crit tbody tr")].map(tr => ({ name: tr.querySelector(".crn").value.trim(), desc: tr.querySelector(".cd").value.trim(), max: parseInt(tr.querySelector(".cm").value, 10) })).filter(c => c.name)
   };
 }
-const cmpKeys = ["title","topics","open","nq","minutes","showScore","adaptive","mode","kinds","groups","criteria"];
-const norm = o => o ? { title: o.title || "", topics: o.topics || [], open: !!o.open, nq: o.nq || 6, minutes: o.minutes ?? 20, showScore: !!o.showScore, adaptive: o.adaptive !== false, mode: o.mode === "train" ? "train" : "exam", kinds: o.mode === "train" && EXAM_BANK ? (o.kinds && o.kinds.length ? o.kinds : ["task"]) : [], groups: o.groups || [],
+const cmpKeys = ["title","topics","open","nq","minutes","showScore","adaptive","annul","mode","kinds","groups","criteria"];
+const norm = o => o ? { title: o.title || "", topics: o.topics || [], open: !!o.open, nq: o.nq || 6, minutes: o.minutes ?? 20, showScore: !!o.showScore, adaptive: o.adaptive !== false, annul: o.annul !== false, mode: o.mode === "train" ? "train" : "exam", kinds: o.mode === "train" && EXAM_BANK ? (o.kinds && o.kinds.length ? o.kinds : ["task"]) : [], groups: o.groups || [],
   criteria: (o.criteria && o.criteria.length ? o.criteria : DEFAULT_CRITERIA).map(c => ({ name: c.name, desc: c.desc || "", max: Number(c.max) })) } : null;
 const pick = o => { const n = norm(o); return JSON.stringify(cmpKeys.map(k => n ? n[k] : null)); };
 // стан збереженої співбесіди (для огляду і плашки)
@@ -153,6 +153,7 @@ function renderSetup(){
           <span class="hint">Час, хв (0 — без обмеження):</span><input type="text" class="mn num" value="${esc(c.minutes ?? 20)}" inputmode="numeric">
           <label class="chk examonly"><input type="checkbox" class="ss" ${c.showScore?'checked':''}> Показувати студенту бал ШІ</label>
           <label class="chk examonly" title="ШІ починає з простих питань, ускладнює для сильних, а слабшим дає одне спрощення (навідне питання або 3 варіанти). Спрощення знижують бал."><input type="checkbox" class="ad" ${c.adaptive !== false ? 'checked' : ''}> Адаптивна складність</label>
+          <label class="chk examonly" title="Якщо під час питання студент виходить зі сторінки довше ніж на 5 с, питання анулюється і ШІ ставить інше; анульовані питання не впливають на оцінку. Після 2 анулювань наступне питання з виходом не зараховується (0 балів)."><input type="checkbox" class="an" ${c.annul !== false ? 'checked' : ''}> Анулювати питання при виході зі сторінки</label>
         </div>
         <div><span class="hint">Групи: </span>${G.map(g=>`<label class="chk"><input type="checkbox" class="gr" value="${esc(g)}" ${(c.groups||[]).includes(g)?'checked':''}> ${esc(g)}</label>`).join("") || '<span class="hint">спершу додайте групи в основному кабінеті</span>'}</div>
         <details class="cfg examonly"><summary>Критерії оцінювання (разом ${sum} б.)</summary>
@@ -181,7 +182,7 @@ function applyLock(id){
 let EDIT = new Set();
 async function newInterview(){
   const id = "s" + Date.now().toString(36);
-  SETTINGS.ai[id] = { title: "", topics: [], open: false, nq: 6, minutes: 20, showScore: false, adaptive: true, groups: [], criteria: DEFAULT_CRITERIA, created: Date.now(), unsaved: true };
+  SETTINGS.ai[id] = { title: "", topics: [], open: false, nq: 6, minutes: 20, showScore: false, adaptive: true, annul: true, groups: [], criteria: DEFAULT_CRITERIA, created: Date.now(), unsaved: true };
   render();
   const box = document.querySelector(`.tp[data-t="${id}"]`); box.scrollIntoView({ behavior: "smooth", block: "center" }); box.querySelector(".ti").focus();
 }
@@ -205,7 +206,7 @@ async function saveTopic(id){
   if (train ? !(nq >= 3 && nq <= 30) : !(nq >= 3 && nq <= 12)) { boxMsg(id, train ? "Кількість завдань — від 3 до 30." : "Кількість питань — від 3 до 12."); return; }
   if (!(mn >= 0 && mn <= 180)) { boxMsg(id, "Час — від 0 до 180 хвилин."); return; }
   if (!train && nq < topics.length) { if (!confirm(`Тем (${topics.length}) більше, ніж питань (${nq}) — деякі теми залишаться без питання. Зберегти так?`)) return; }
-  SETTINGS.ai[id] = { title, topics, open: box.querySelector(".op").checked, nq, minutes: mn, showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked,
+  SETTINGS.ai[id] = { title, topics, open: box.querySelector(".op").checked, nq, minutes: mn, showScore: box.querySelector(".ss").checked, adaptive: box.querySelector(".ad").checked, annul: box.querySelector(".an").checked,
     mode, ...(train && EXAM_BANK ? { kinds } : {}),
     groups: [...box.querySelectorAll(".gr:checked")].map(i => i.value), criteria: crit, created: (SETTINGS.ai[id] && SETTINGS.ai[id].created) || Date.now() };
   await st.saveSettings(SETTINGS); snap(); render(); boxMsg(id, "Збережено ✓ Зміни діють приблизно за 30 секунд.", false);
@@ -289,7 +290,34 @@ function suspect(v){
   return s.startsWith("вис") ? '<span class="pill p-hi">висока</span>' : s.startsWith("сер") ? '<span class="pill p-mid">середня</span>' : s.startsWith("низ") ? '<span class="pill p-lo">низька</span>' : '<span class="hint">—</span>';
 }
 const nqOf = r => (SETTINGS.ai[r.t] || {}).nq || ((SETTINGS.ai[r.t] || {}).mode === "train" ? 10 : 6);
-function asked(r){ return (r.messages||[]).filter(m => m.role === "assistant" && /(Питання|Завдання)\s+\d+\s+з\s+\d+/.test(m.content)).length; }
+function asked(r){ return Math.max(0, ...(r.messages||[]).filter(m => m.role === "assistant").flatMap(m => [...m.content.matchAll(/(?:Питання|Завдання)\s+(\d+)\s+з\s+\d+/g)].map(x => +x[1]))); }
+// службові повідомлення сайту (анулювання питання через вихід зі сторінки)
+const isSys = m => !!m && m.role === "user" && typeof m.content === "string" && m.content.startsWith("⛔");
+function annOf(r){
+  const sys = (r.messages||[]).filter(isSys);
+  return { ann: sys.filter(m => m.content.includes("анульовано")).length, zero: sys.filter(m => m.content.includes("не зараховано")).length };
+}
+// швидкість набору кожної відповіді: символи / секунди від появи питання до надсилання (разом із читанням)
+const FAST = 4, FAST_LEN = 80, TABS_WARN = 3;
+function speeds(r){
+  const secs = (r.meta && r.meta.secs) || [], out = {};
+  let k = 0;
+  (r.messages||[]).forEach((m, i) => {
+    if (m.role !== "user" || i === 0) return;
+    const sec = secs[k++];
+    if (isSys(m) || !sec) return;
+    const cps = m.content.length / sec;
+    out[i] = { sec, cps, fast: cps > FAST && m.content.length >= FAST_LEN };
+  });
+  return out;
+}
+function maxSpeed(r){ const long = Object.entries(speeds(r)).filter(([i]) => r.messages[i].content.length >= FAST_LEN).map(([, x]) => x.cps); return long.length ? Math.max(...long) : 0; }
+const cpsFmt = v => v ? v.toFixed(1).replace(".", ",") : "—";
+function tabsCell(r){
+  const b = (r.meta && r.meta.blur) || 0, a = annOf(r);
+  return `${b >= TABS_WARN ? `<span class="pill p-mid" title="Часті виходи зі сторінки">${b}</span>` : b}${a.ann || a.zero ? ` <span class="hint" title="Анульовано питань · не зараховано">ан. ${a.ann}${a.zero ? ` · 0 б.: ${a.zero}` : ""}</span>` : ""}`;
+}
+function speedCell(r){ const v = maxSpeed(r); return v > FAST ? `<span class="pill p-mid" title="Швидше ${FAST} симв./с на довгій відповіді">${cpsFmt(v)}</span>` : cpsFmt(v); }
 function duration(r){ const a = r.meta && r.meta.startedAt, b = (r.meta && r.meta.finishedAt) || r.updatedAt; return a && b ? (new Date(b) - new Date(a)) / 1000 : 0; }
 function avgSecs(r){ const s = (r.meta && r.meta.secs) || []; return s.length ? s.reduce((x,y)=>x+y,0) / s.length : 0; }
 
@@ -338,12 +366,12 @@ function renderResults(){
     <div class="row"><select id="selT" style="width:auto;flex:1;min-width:240px"><option value="">— співбесіда —</option>${list.map(([id,c])=>`<option value="${id}" ${SEL.topic===id?'selected':''}>${esc(c.title||"без назви")}</option>`).join("")}</select>
       <select id="selG" style="width:auto"><option value="">Усі групи</option>${groups.map(g=>`<option ${SEL.group===g?'selected':''}>${esc(g)}</option>`).join("")}</select>
       <button class="sec sm" data-act="reload">Оновити</button><button class="sec sm" data-act="csv" ${att.length?'':'disabled'}>CSV</button><button class="sec sm" data-act="json" ${att.length?'':'disabled'}>JSON (протоколи)</button></div>
-    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th title="Найвищий рівень, на якому студент упевнено відповідав сам · кількість спрощень">Рівень · спрощень</th><th>Підозра ШІ</th><th title="Дослівний збіг відповідей з текстом лекції">Збіг з лекцією</th><th title="Перемикання вкладок">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th></tr></thead><tbody>
-      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="9"></td></tr>`;
+    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th title="Найвищий рівень, на якому студент упевнено відповідав сам · кількість спрощень">Рівень · спрощень</th><th>Підозра ШІ</th><th title="Дослівний збіг відповідей з текстом лекції">Збіг з лекцією</th><th title="Виходи зі сторінки за співбесіду (жовтим — ${TABS_WARN} і більше) · анульовані питання">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th title="Найбільша швидкість набору довгої відповіді, символів за секунду, разом із читанням питання (жовтим — понад ${FAST})">Швидкість, симв./с</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th></tr></thead><tbody>
+      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="10"></td></tr>`;
         const e = r.eval || evalFromText(r) || {}; return `<tr class="clk" data-act="open" data-v="${esc(r.id)}">
         <td>${esc(r.name)}</td><td>${esc(r.group)}</td><td><span class="pill ${s0.cls}">${esc(s0.label)}</span></td>
         <td>${e.max ? `<b>${e.total}</b> / ${e.max}` : "—"}</td><td>${lvl(e)}</td><td>${e.ai_suspect ? suspect(e.ai_suspect) : "—"}</td><td>${ovlSummary(r.id)}</td>
-        <td>${(r.meta&&r.meta.blur)||0}</td><td>${(r.meta&&r.meta.pastes)||0}</td><td>${fmt(avgSecs(r))}</td><td>${fmt(duration(r))}</td>
+        <td>${tabsCell(r)}</td><td>${(r.meta&&r.meta.pastes)||0}</td><td>${speedCell(r)}</td><td>${fmt(avgSecs(r))}</td><td>${fmt(duration(r))}</td>
         <td data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</td></tr>`; }).join("")}
       </tbody></table></div>` : '<p class="hint" style="margin-top:12px">Ще ніхто не проходив цю співбесіду, а списків груп немає.</p>') : `<p class="hint" style="margin-top:12px">Оберіть співбесіду.</p>`}
   </div>
@@ -427,6 +455,9 @@ function detailHtml(r){
   const e = r.eval || evalFromText(r), secs = (r.meta && r.meta.secs) || [];
   let ui = 0;
   const ov = {}; (OVL[r.id] || []).forEach(o => ov[o.i] = o);
+  const sp = speeds(r), an = annOf(r), aw = {};
+  ((r.meta && r.meta.away) || []).forEach(x => { if (!x.a) (aw[x.m - 1] ||= []).push(x); });
+  const awayLine = mi => (aw[mi] || []).map(x => `<div class="awy">↗ вихід зі сторінки на ${fmt(x.s)}${x.r ? " (сторінку закривали)" : ""}${x.s < 5 ? " — коротко, питання не анульовано" : ""}</div>`).join("");
   return `<div class="pbody">
     <div class="row"><span class="sp"></span><span data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</span></div>
     ${e ? `${e.error ? '<div class="alert show">ШІ не зміг коректно сформувати оцінку — оцініть за протоколом вручну.</div>' : ""}
@@ -436,13 +467,13 @@ function detailHtml(r){
       ${e.gaps && e.gaps.length ? `<p><b>Прогалини:</b> ${e.gaps.map(esc).join("; ")}</p>` : ""}
       ${e.level || e.hints != null ? `<p><b>Рівень:</b> ${lvl(e)} ${esc(e.level_why || "")}</p>` : ""}
       ${e.ai_suspect ? `<p><b>Ймовірність використання ШІ:</b> ${suspect(e.ai_suspect)} ${esc(e.ai_suspect_why)}</p>` : ""}` : `<p class="hint">Співбесіда ще не завершена — оцінки поки немає.</p>`}
-    <p class="hint">Вкладки: ${(r.meta&&r.meta.blur)||0} · Спроби вставки: ${(r.meta&&r.meta.pastes)||0} · Тривалість: ${fmt(duration(r))}${r.meta&&r.meta.aiNoticeAccepted ? ` · Попередження про ШІ прийнято: ${new Date(r.meta.aiNoticeAccepted).toLocaleString("uk-UA")}` : ""}</p>
+    <p class="hint">Вкладки: ${tabsCell(r)}${(r.meta && r.meta.away && r.meta.away.length) ? ` · виходів під час питань: ${r.meta.away.length}` : ""}${an.ann ? ` · анульовано питань: ${an.ann}` : ""}${an.zero ? ` · не зараховано: ${an.zero}` : ""} · Спроби вставки: ${(r.meta&&r.meta.pastes)||0} · Тривалість: ${fmt(duration(r))}${r.meta&&r.meta.aiNoticeAccepted ? ` · Попередження про ШІ прийнято: ${new Date(r.meta.aiNoticeAccepted).toLocaleString("uk-UA")}` : ""}</p>
     ${r.evalPrev && r.eval ? `<p class="hint">Переоцінено ${r.regradedAt ? new Date(r.regradedAt).toLocaleString("uk-UA") : ""}: спершу було <b>${r.evalPrev.total} / ${r.evalPrev.max}</b>.</p>` : ""}
     ${e && !r.eval ? '<div class="info">Оцінку відновлено з тексту діалогу (стара версія воркера). Протокол не завершено — за потреби дозвольте пройти заново.</div>' : ""}
     ${OVL[r.id] && OVL[r.id].some(o => o.pct) ? '<p class="hint">Жовтим підсвічено фрагменти, дослівно (від 5 слів поспіль) збіжні з текстом лекції. Окремі терміни й визначення — нормально; ⚠ — відповідь значною мірою переписана.</p>' : ""}
-    ${(r.messages||[]).map((m, mi) => mi === 0 ? "" : m.role === "user"
-        ? `<div class="msg me">${markCopied(m.content, ov[mi])}${secs[ui] != null || (ov[mi] && ov[mi].pct) ? `<small>${secs[ui] != null ? `${fmt(secs[ui++])} · ` : ""}${m.content.length} симв.${ov[mi] && ov[mi].pct ? ` · збіг з лекцією ${ov[mi].pct} %, до ${ov[mi].longest} слів поспіль${ov[mi].src ? " (" + esc(ov[mi].src) + ")" : ""}${ov[mi].flag ? " ⚠" : ""}` : ""}</small>` : ""}</div>`
-        : `<div class="msg ai">${esc(m.content.split(/<eval>/i)[0].trim() || "(оцінка — вище)")}</div>`).join("")}
+    ${(r.messages||[]).map((m, mi) => mi === 0 ? "" : isSys(m) ? (ui++, `<div class="msg sys">${esc(m.content)}</div>`) : m.role === "user"
+        ? `<div class="msg me">${markCopied(m.content, ov[mi])}${secs[ui] != null || (ov[mi] && ov[mi].pct) ? `<small>${secs[ui] != null ? `${fmt(secs[ui++])} · ` : ""}${m.content.length} симв.${sp[mi] && m.content.length >= FAST_LEN ? ` · ${sp[mi].fast ? "<b>⚠ " : ""}${cpsFmt(sp[mi].cps)} симв./с${sp[mi].fast ? "</b>" : ""}` : ""}${ov[mi] && ov[mi].pct ? ` · збіг з лекцією ${ov[mi].pct} %, до ${ov[mi].longest} слів поспіль${ov[mi].src ? " (" + esc(ov[mi].src) + ")" : ""}${ov[mi].flag ? " ⚠" : ""}` : ""}</small>` : ""}</div>`
+        : `<div class="msg ai">${esc(m.content.split(/<eval>/i)[0].trim() || "(оцінка — вище)")}</div>${awayLine(mi)}`).join("")}
     <div class="row" style="margin-top:12px"><span class="sp"></span>
       ${!r.done && r.uid ? `<button class="sm sec" data-act="unbind" data-v="${esc(r.id)}">Дозволити продовжити з іншого пристрою</button>` : ""}
       ${r.done && r.sig ? `<button class="sm sec" data-act="regrade" data-v="${esc(r.id)}">Переоцінити за поточними правилами</button>` : ""}
@@ -452,7 +483,8 @@ function detailHtml(r){
 // переоцінити завершену спробу: воркер перевіряє підпис, оцінює протокол заново і підписує нову оцінку
 async function regradeOne(r){
   const res = await fetch(WORKER_URL.replace(/\/$/,"") + "/regrade", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.eval ?? null }) });
+    body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.eval ?? null,
+      stats: { blur: (r.meta && r.meta.blur) || 0, away: (r.meta && r.meta.away) || [], secs: (r.meta && r.meta.secs) || [] } }) });
   const d = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(d.error || ("Помилка " + res.status));
   const prev = r.evalPrev || r.eval || null;
@@ -481,10 +513,10 @@ function exportCsv(){
   const rows = ROWS.filter(r => !SEL.group || r.group === SEL.group);
   const crit = [...new Set(rows.flatMap(r => ((r.eval||{}).criteria||[]).map(c => c.name)))];
   const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
-  const head = ["Група","Студент","Стан","Бал","Макс",...crit,"Рівень","Спрощень","Підозра ШІ","Макс. збіг з лекцією, %","Вкладки","Вставки","Сер. час відповіді, с","Тривалість, с","Протокол","Підсумок"];
+  const head = ["Група","Студент","Стан","Бал","Макс",...crit,"Рівень","Спрощень","Підозра ШІ","Макс. збіг з лекцією, %","Вкладки","Анульовано питань","Не зараховано","Вставки","Макс. швидкість набору, симв./с","Сер. час відповіді, с","Тривалість, с","Протокол","Підсумок"];
   const lines = rows.map(r => { const e = r.eval || {}; return [r.group, r.name, r.done?"завершено":"в процесі", e.total ?? "", e.max ?? "",
     ...crit.map(n => { const c = (e.criteria||[]).find(x => x.name === n); return c ? c.score : ""; }),
-    e.level || "", e.hints ?? "", e.ai_suspect || "", OVL[r.id] && OVL[r.id].length ? Math.max(...OVL[r.id].map(x => x.pct)) : "", (r.meta&&r.meta.blur)||0, (r.meta&&r.meta.pastes)||0, Math.round(avgSecs(r)), Math.round(duration(r)),
+    e.level || "", e.hints ?? "", e.ai_suspect || "", OVL[r.id] && OVL[r.id].length ? Math.max(...OVL[r.id].map(x => x.pct)) : "", (r.meta&&r.meta.blur)||0, annOf(r).ann, annOf(r).zero, (r.meta&&r.meta.pastes)||0, maxSpeed(r) ? maxSpeed(r).toFixed(1).replace(".", ",") : "", Math.round(avgSecs(r)), Math.round(duration(r)),
     VER[r.id] === "ok" ? "ок" : VER[r.id] === "bad" ? "змінено" : "", e.summary || ""].map(q).join(";"); });
   download(`spivbesida_${SEL.topic}${SEL.group?"_"+SEL.group:""}.csv`, "﻿" + [head.map(q).join(";"), ...lines].join("\r\n"), "text/csv;charset=utf-8");
 }

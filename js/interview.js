@@ -3,6 +3,8 @@ import { WORKER_URL, AI_SUBJECT, EXAM_BANK } from "./ai-config.js";
 
 const START = "Починаймо співбесіду.";
 const MAX_ANSWER = 2000;
+const AWAY_LIMIT = 5;      // с поза сторінкою під час питання, після яких питання анулюється
+const ANNUL_MAX = 2;       // скільки разів анулюємо; далі — «не зараховано»
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 const params = new URLSearchParams(location.search);
@@ -59,8 +61,8 @@ function renderLogin(){
       <li>Відповідайте <b>своїми словами</b>, як на усному занятті. Вставляти скопійований текст не можна.</li>
       ${CFG.minutes ? `<li>На всю співбесіду — <b>${CFG.minutes} хв</b>. Коли час мине, співбесіда завершиться автоматично.</li>` : ""}
       ${CFG.adaptive !== false ? `<li>Якщо питання здається складним — так і напишіть «не знаю» або «не зрозумів». ШІ запропонує <b>простіший варіант</b> (навідне питання або варіанти на вибір). Краще відповісти з підказкою, ніж не відповісти зовсім.</li>` : ""}
-      <li>Перемикання на інші вкладки і програми фіксується.</li>
-      <li>Якщо зник зв'язок чи світло, відкрийте посилання знову з <b>того самого пристрою і браузера</b>, введіть ті самі групу і ПІБ — продовжите з того ж місця.</li>
+      ${CFG.annul !== false ? `<li><b>Не виходьте зі сторінки</b> під час питання (інша вкладка, програма, згорнутий браузер). Якщо вийти довше ніж на ${AWAY_LIMIT} с, <b>питання анулюється</b> і ШІ поставить інше. Після ${ANNUL_MAX} анулювань наступне питання, під час якого ви вийдете, <b>не зараховується</b> (0 балів). Перед початком закрийте зайві програми й вимкніть сповіщення; не давайте екрану телефона згаснути.</li>` : `<li>Перемикання на інші вкладки і програми фіксується.</li>`}
+      <li>Якщо зник зв'язок чи світло, відкрийте посилання знову з <b>того самого пристрою і браузера</b>, введіть ті самі групу і ПІБ — продовжите з того ж місця${CFG.annul !== false ? " (питання, на якому сталася перерва, заміниться іншим; у ліміт анулювань це не рахується)" : ""}.</li>
     </ol>
     <div class="info" style="margin-top:14px">
       <b>⚠ Питання ставить штучний інтелект, а не викладач.</b>
@@ -160,10 +162,17 @@ async function login(){
           meta: { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [], aiNoticeAccepted: new Date().toISOString(), seed: Math.random().toString(36).slice(2, 12) } };
   }
   A.uid = UID; A.meta ||= { startedAt: new Date().toISOString(), blur: 0, pastes: 0, secs: [] };
+  // сторінку закривали, поки чекало питання: перерва рахується як вихід зі сторінки
+  const hid = Math.max((loc && loc.meta && loc.meta.hiddenAt) || 0, (server && server.meta && server.meta.hiddenAt) || 0);
+  delete A.meta.hiddenAt;
   await save();
   renderChat();
   if (!A.messages.length) send(START);
-  else if (A.messages.length % 2 === 0) { askedAt = Date.now(); }        // останнє — питання ШІ, чекаємо відповідь
+  else if (A.messages.length % 2 === 0) {                               // останнє — питання ШІ, чекаємо відповідь
+    askedAt = Date.now();
+    const away = hid ? Math.round((Date.now() - hid) / 1000) : 0;
+    if (away >= AWAY_LIMIT) onAway(away, true);
+  }
   else send(null);                                                     // відповідь студента не дійшла — надсилаємо ще раз
 }
 
@@ -171,6 +180,7 @@ async function login(){
 function bubble(m, i){
   if (i === 0) return "";
   const text = m.role === "assistant" ? (m.content.split(/<eval>/i)[0].trim() || "Дякую! Співбесіду завершено.") : m.content;
+  if (isSysMsg(m)) return `<div class="msg sys">${esc(text)}</div>`;
   return `<div class="msg ${m.role==="user"?"me":"ai"}">${esc(text)}</div>`;
 }
 function renderChat(){
@@ -194,6 +204,7 @@ function renderChat(){
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSend(); } });
   try { ta.value = localStorage.getItem("ai-draft:"+AID) || ""; $("cnt").textContent = `${ta.value.length} / ${MAX_ANSWER}`; } catch(e){}
   $("send").onclick = onSend;
+  wake();
   startTimer();
   scrollEnd();
 }
@@ -223,7 +234,7 @@ async function send(text, finish = false){
   if (busy) return;
   busy = true; lockInput(true); $("sendErr") && ($("sendErr").textContent = "");
   if (text !== null) {
-    if (askedAt && text !== START) A.meta.secs.push(Math.round((Date.now() - askedAt) / 1000));
+    if (text !== START) A.meta.secs.push(askedAt ? Math.max(1, Math.round((Date.now() - askedAt) / 1000)) : 0);
     A.messages.push({ role: "user", content: text });
     if (text !== START) $("chat").insertAdjacentHTML("beforeend", bubble(A.messages[A.messages.length-1], 1));
     try { localStorage.removeItem("ai-draft:"+AID); } catch(e){}
@@ -234,7 +245,8 @@ async function send(text, finish = false){
   try {
     const r = await fetch(WORKER_URL.replace(/\/$/,"") + "/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: AI_SUBJECT, topic: TID, sid: AID, seed: A.meta.seed || "", messages: A.messages, sig: A.sig, finish: finish || timeIsUp() })
+      body: JSON.stringify({ subject: AI_SUBJECT, topic: TID, sid: AID, seed: A.meta.seed || "", messages: A.messages, sig: A.sig, finish: finish || timeIsUp(),
+        annul: isSysMsg(A.messages[A.messages.length-1]), stats: { blur: A.meta.blur || 0, away: A.meta.away || [], secs: A.meta.secs || [] } })
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(d.error || ("Помилка " + r.status)), { status: r.status });
@@ -258,7 +270,8 @@ async function send(text, finish = false){
     if (e.status) {
       // сервер відповів помилкою: повідомлення студента повертаємо в поле, щоб не втратити
       const last = A.messages[A.messages.length-1];
-      if (last && last.role === "user" && last.content !== START) {
+      if (last && isSysMsg(last)) { A.messages.pop(); A.meta.secs.pop(); const bs = $("chat").querySelectorAll(".msg.sys"); if (bs.length) bs[bs.length-1].remove(); }
+      else if (last && last.role === "user" && last.content !== START) {
         A.messages.pop(); A.meta.secs.pop();
         const bs = $("chat").querySelectorAll(".msg.me"); if (bs.length) bs[bs.length-1].remove();
         $("ans").value = last.content;
@@ -332,9 +345,55 @@ function renderDone(){
   </div>`;
 }
 
-// ---------- перемикання вкладок
+// ---------- перемикання вкладок: облік виходів під час питань і анулювання
+function isSysMsg(m){ return !!m && m.role === "user" && typeof m.content === "string" && m.content.startsWith("⛔"); }
+function waitingAnswer(){ return A && !A.done && !busy && A.messages.length >= 2 && A.messages.length % 2 === 0; }
+function currentQ(){
+  for (let i = A.messages.length - 1; i >= 0; i--) {
+    const m = A.messages[i];
+    if (m.role !== "assistant") continue;
+    const all = [...m.content.matchAll(/(?:Питання|Завдання)\s+(\d+)\s+з\s+\d+/g)];
+    if (all.length) return Number(all[all.length - 1][1]);
+  }
+  return 1;
+}
+let hideAt = 0;
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && A && !A.done && A.messages.length) { A.meta.blur = (A.meta.blur||0) + 1; save(); }
+  if (!A || A.done || !A.messages.length) return;
+  if (document.hidden) {
+    A.meta.blur = (A.meta.blur||0) + 1;
+    hideAt = Date.now();
+    if (!TRAIN && waitingAnswer()) A.meta.hiddenAt ||= hideAt;   // якщо сторінку закриють — врахуємо при поверненні
+    save();
+  } else {
+    wake();
+    if (!hideAt) return;
+    const from = Math.max(hideAt, askedAt || 0);
+    hideAt = 0;
+    const away = Math.round((Date.now() - from) / 1000);
+    delete A.meta.hiddenAt;
+    if (waitingAnswer() && away >= 2) onAway(away, false);
+    else save();
+  }
 });
+// вихід під час питання: записуємо, а в співбесіді (не тренуванні) — анулюємо питання
+function onAway(away, reopened){
+  const q = currentQ();
+  (A.meta.away ||= []).push({ q, s: away, at: new Date().toISOString(), m: A.messages.length, ...(reopened ? { r: 1 } : {}) });
+  if (TRAIN || CFG.annul === false || away < AWAY_LIMIT || finishing) { save(); return; }
+  const used = A.messages.filter(m => isSysMsg(m) && m.content.includes("анульовано: вихід")).length;
+  const text = reopened ? `⛔ Питання ${q} анульовано: повторний вхід після перерви на ${away} с.`
+    : used < ANNUL_MAX ? `⛔ Питання ${q} анульовано: вихід зі сторінки на ${away} с.`
+    : `⛔ Питання ${q} не зараховано: вихід зі сторінки на ${away} с.`;
+  A.meta.away[A.meta.away.length - 1].a = text.includes("не зараховано") ? "0" : "ан";
+  const ta = $("ans"); if (ta) { ta.value = ""; $("cnt").textContent = `0 / ${MAX_ANSWER}`; }
+  try { localStorage.removeItem("ai-draft:"+AID); } catch(e){}
+  send(text);
+}
+// не даємо екрану телефона згаснути під час співбесіди (інакше це виглядало б як вихід зі сторінки)
+let wakeLock = null;
+async function wake(){
+  try { if ("wakeLock" in navigator && !document.hidden && A && !A.done && (!wakeLock || wakeLock.released)) wakeLock = await navigator.wakeLock.request("screen"); } catch(e){}
+}
 
 start();
