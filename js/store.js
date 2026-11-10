@@ -72,6 +72,17 @@ export async function saveSettings(s){
   if (DEMO) { LS.set(SETTINGS_DOC, s); return; }
   const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"config",SETTINGS_DOC), s);
 }
+// налаштування практичних робіт — окремий документ, щоб не конфліктувати з іншими кабінетами
+const PRACTICE_DOC = CFG.SUBJECT ? "practice_" + CFG.SUBJECT : "practice";
+export async function getPractice(){
+  if (DEMO) return LS.get(PRACTICE_DOC) || {};
+  const f = await F(); const s = await f.fs.getDoc(f.fs.doc(f.D,"config",PRACTICE_DOC));
+  return s.exists() ? s.data() : {};
+}
+export async function savePractice(p){
+  if (DEMO) { LS.set(PRACTICE_DOC, p); return; }
+  const f = await F(); await f.fs.setDoc(f.fs.doc(f.D,"config",PRACTICE_DOC), p);
+}
 export async function listAttempts(topic){
   if (DEMO) return LS.keys("att:"+topic+"__").map(k=>({ id:k.slice(4), ...LS.get(k) }));
   const f = await F();
