@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Практична робота — Природничі науки: Земля</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+.chk{display:flex;gap:8px;align-items:flex-start;font-weight:600;cursor:pointer}.chk input{margin-top:5px;flex:none}
+.th h3{color:var(--acc);font-size:17px;margin:18px 0 6px}.th p,.th li{line-height:1.55}
+.frm{background:#f7faf3;border:1px solid var(--line);border-left:4px solid var(--acc);border-radius:8px;padding:10px 12px;margin:8px 0;line-height:1.8}
+.ex{background:#fbfcf9;border:1px dashed var(--acc2);border-radius:10px;padding:10px 12px;margin:10px 0}.ex p{margin:6px 0 0}
+details.thd{margin:0 0 12px}details.thd>summary{cursor:pointer;color:var(--acc);font-weight:600}
+.prog{display:flex;gap:4px;margin:0 0 12px;flex-wrap:wrap}.prog span{flex:1;min-width:18px;height:8px;border-radius:4px;background:#e4e9de}
+.prog span.ok{background:var(--ok)}.prog span.half{background:#e0b04a}.prog span.zero{background:#d9a08a}.prog span.cur{outline:2px solid var(--acc)}
+.cond{font-size:16px;line-height:1.6;margin:4px 0 14px}
+.fld{display:flex;align-items:center;gap:8px;margin:8px 0;flex-wrap:wrap}.fld label{margin:0;min-width:150px;font-weight:600}
+.fld input,.fld select{width:150px!important;font-size:17px}.fld .u{color:var(--mut)}
+.fld.bad input,.fld.bad select{border-color:var(--warn);background:#fdf3ee}.fld.good input,.fld.good select{border-color:var(--ok);background:#eef7ea}
+.ptab td{padding:4px 8px}.ptab tr.fld{display:table-row}.ptab input{width:110px!important;font-size:16px}
+.fb{border-radius:10px;padding:10px 12px;margin:10px 0;line-height:1.5}.fb.bad{background:#fdf3ee;color:#7a2e10;border:1px solid #f0c9b8}.fb.ok{background:#eef7ea;color:#1f5a33;border:1px solid #c8e3c4}.fb.hint{background:#fff6dc;color:#5c4400;border:1px solid #f0dfa8}.fb.ai{background:#eef4fb;color:#1d3b5c;border:1px solid #cddcee;white-space:pre-wrap}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.cost{font-size:12px;opacity:.8}
+.graph{width:100%;max-width:520px;margin:10px 0}
+.res td,.res th{padding:6px 8px}
+</style>
+</head>
+<body class="nosel">
+<div class="wrap">
+  <header class="top"><h1 id="htitle">Практична робота</h1><span class="sp"></span></header>
+  <div id="demo"></div>
+  <div class="alert" id="alert"></div>
+  <div class="net" id="net"></div>
+  <div id="app"><div class="card">Завантаження…</div></div>
+</div>
+<script type="module" src="js/practice.js"></script>
+</body>
+</html>
