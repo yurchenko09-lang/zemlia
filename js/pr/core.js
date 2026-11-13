@@ -30,41 +30,44 @@ export function checkField(f, raw){
 }
 
 // ---- оцінювання (однакове на сторінці студента і в кабінеті)
+export const AWAY_LIMIT = 5;   // с поза сторінкою під час задачі, після яких задача анулюється
+export const ANNUL_MAX = 2;    // скільки разів анулюємо; далі — задача 0 балів
 export const RULES = {
-  wrong: 0.15,      // за кожну неправильну спробу (враховуються перші 3)
-  hint1: 0.20,      // підказка «з чого почати»
-  hint2: 0.30,      // підказка «формула з числами» (додатково)
-  ai: 0.10,         // кожне запитання до ШІ (враховуються перші 2)
-  floor: 0.20,      // якщо зрештою розв'язано самостійно — не менше 20 %
-  twin: 0.5         // аналогічна задача після показаного розв'язку — максимум 50 %
+  wrong: 0.25,      // за кожну неправильну спробу (враховуються перші 3)
+  hint1: 0.25,      // підказка «з чого почати»
+  hint2: 0.35,      // підказка «формула з числами» (додатково)
+  ai: 0.15,         // кожне запитання до ШІ (враховуються перші 2)
+  floor: 0.10,      // якщо зрештою розв'язано самостійно — не менше 10 %
+  twin: 0.3         // аналогічна задача після показаного розв'язку — максимум 30 %
 };
 export function taskStats(t){
   const log = t.log || [];
-  const s = { wrong: 0, hint1: false, hint2: false, ai: 0, sol: false, ok: false };
+  const s = { wrong: 0, hint1: false, hint2: false, ai: 0, sol: false, ok: false, zero: false };
   for (const e of log) {
     if (s.ok) break;
     if (e.type === "try") { if (e.ok) s.ok = true; else s.wrong++; }
     else if (e.type === "hint") { if (e.lvl >= 1) s.hint1 = true; if (e.lvl >= 2) s.hint2 = true; }
     else if (e.type === "ai") s.ai++;
     else if (e.type === "sol") s.sol = true;
+    else if (e.type === "zero") s.zero = true;          // не зараховано через повторний вихід зі сторінки
   }
   return s;
 }
 export function creditOf(t){
-  const s = taskStats(t), max = t.max ?? 1;
-  if (!s.ok || s.sol) return 0;
+  const s = taskStats(t), max = t.twin ? Math.min(t.max ?? RULES.twin, RULES.twin) : (t.max ?? 1);
+  if (t.annulled || s.zero || !s.ok || s.sol) return 0;
   let c = 1 - RULES.wrong * Math.min(s.wrong, 3) - (s.hint1 ? RULES.hint1 : 0) - (s.hint2 ? RULES.hint2 : 0) - RULES.ai * Math.min(s.ai, 2);
   return max * Math.max(RULES.floor, c);
 }
 // підсумок: 12 × (сума балів за задачі) / (кількість основних задач)
 export function gradeOf(att, nSlots){
   const tasks = att.tasks || [];
-  const n = nSlots || tasks.filter(t => !t.twin).length || 1;
+  const n = nSlots || tasks.filter(t => !t.twin && !t.annulled).length || 1;
   const sum = tasks.reduce((a, t) => a + creditOf(t), 0);
   return { points: Math.round(12 * sum / n * 10) / 10, grade: Math.round(12 * sum / n), sum, n };
 }
 export function summaryOf(att){
-  const tasks = att.tasks || [];
+  const tasks = (att.tasks || []).filter(t => !t.annulled);
   const st = tasks.map(taskStats);
   return {
     solved: st.filter(s => s.ok && !s.sol).length,
@@ -72,7 +75,9 @@ export function summaryOf(att){
     wrong: st.reduce((a, s) => a + s.wrong, 0),
     hints: st.reduce((a, s) => a + (s.hint1 ? 1 : 0) + (s.hint2 ? 1 : 0), 0),
     ai: st.reduce((a, s) => a + s.ai, 0),
-    sol: st.filter(s => s.sol).length
+    sol: st.filter(s => s.sol).length,
+    annulled: (att.tasks || []).filter(t => t.annulled).length,
+    zero: st.filter(s => s.zero).length
   };
 }
 
