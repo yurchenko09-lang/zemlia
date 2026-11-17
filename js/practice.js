@@ -3,7 +3,7 @@
 import * as st from "./store.js";
 import { WORKER_URL, AI_SUBJECT } from "./ai-config.js";
 import { PRACTICALS, loadPractical } from "./pr/index.js";
-import { buildTask, checkField, num, creditOf, gradeOf, taskStats, RULES, fmtN } from "./pr/core.js";
+import { buildTask, checkField, num, creditOf, gradeOf, taskStats, RULES, fmtN, AWAY_LIMIT, ANNUL_MAX, setOf, slotsOf } from "./pr/core.js";
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -46,7 +46,7 @@ async function start(){
 
 function renderLogin(){
   const groups = (PCFG.groups && PCFG.groups.length ? PCFG.groups : SETTINGS.groups) || [];
-  const n = P.tasks.length;
+  const n = setOf(P).length;
   $("app").innerHTML = `<div class="card">
     <div class="hint">Практична робота №${P.num}</div><div class="tq">${esc(P.title)}</div>
     <p><b>Мета:</b> ${esc(P.goal)}</p>
@@ -56,6 +56,7 @@ function renderLogin(){
       <li>Відповідь — число (дробове — через кому). Сайт одразу перевіряє її і, якщо є помилка, підказує, де саме.</li>
       <li>Застрягли — візьміть <b>підказку</b>${PCFG.ai !== false ? " або <b>запитайте ШІ-помічника</b>" : ""}. Не виходить зовсім — можна подивитися розв'язок, і тоді ви отримаєте <b>аналогічну задачу</b> з іншими числами.</li>
       <li>Наприкінці — короткий <b>висновок</b> своїми словами.</li>
+      <li>Для обчислень на сторінці є <b>калькулятор</b> — виходити зі сторінки не потрібно.${PCFG.annul !== false ? ` Якщо під час задачі вийти зі сторінки (інша вкладка чи програма) довше ніж на ${AWAY_LIMIT} с, задача <b>анулюється</b> — з'являться нові числа, а введене зітреться. Після ${ANNUL_MAX} анулювань наступна задача, під час якої ви вийдете, отримує <b>0 балів</b>.` : ""}</li>
     </ol>
     <div class="info" style="margin-top:12px"><b>Як рахується оцінка</b> (максимум 12 балів, усі задачі однакові за вагою):
       <ul style="margin:6px 0 0;padding-left:20px">
@@ -101,12 +102,17 @@ async function login(){
   if (!A) {
     A = { topic: "pr-" + PID, pid: PID, group: g, name: n, uid: UID, done: false, stage: "theory", cur: 0,
       seed: Math.random().toString(36).slice(2, 12),
-      tasks: P.tasks.map((T, i) => ({ key: T.key, slot: i, variant: 0, max: 1, log: [] })),
+      tasks: setOf(P).map((T, i) => ({ key: T.key, slot: i, variant: 0, max: 1, log: [] })),
       conclusion: "", meta: { startedAt: new Date().toISOString(), blur: 0 } };
   }
   A.uid = UID;
+  // сторінку закривали посеред задачі — перерва рахується як вихід (анулювання без зарахування в ліміт)
+  const hid = Math.max((loc && loc.meta && loc.meta.hiddenAt) || 0, (server && server.meta && server.meta.hiddenAt) || 0);
+  delete A.meta.hiddenAt;
   await save();
   route();
+  const away = hid ? Math.round((Date.now() - hid) / 1000) : 0;
+  if (away >= AWAY_LIMIT && taskOpen()) annul(away, true);
 }
 
 function route(){
@@ -131,8 +137,8 @@ function renderTheory(){
 // ---------- задача
 const cur = () => A.tasks[A.cur];
 function progress(){
-  return `<div class="prog">${A.tasks.map((t, i) => { const s = taskStats(t), c = creditOf(t), m = t.max ?? 1;
-    const cls = (s.ok || s.sol) ? (c >= 0.999 * m ? "ok" : c > 0 ? "half" : "zero") : "";
+  return `<div class="prog">${A.tasks.map((t, i) => { if (t.annulled) return ""; const s = taskStats(t), c = creditOf(t), m = t.max ?? 1;
+    const cls = (s.ok || s.sol || s.zero) ? (c >= 0.999 * m ? "ok" : c > 0 ? "half" : "zero") : "";
     return `<span class="${cls}${i === A.cur ? " cur" : ""}" title="${t.twin ? "Аналогічна задача" : "Задача " + (t.slot + 1)}"></span>`; }).join("")}</div>`;
 }
 function fieldHtml(f, t, done){
@@ -167,14 +173,17 @@ function drawGraph(fs, vals){
 function renderTask(){
   const t = cur();
   const { T, p, fields } = buildTask(P, t.key, A.seed, t.variant);
-  const s = taskStats(t), done = s.ok || s.sol;
-  const N = P.tasks.length;
+  const s = taskStats(t), done = s.ok || s.sol || s.zero;
+  const prev = A.tasks[A.cur - 1], annNote = prev && prev.annulled && prev.slot === t.slot
+    ? `<div class="fb bad"><b>Задачу анульовано</b>, бо ви ${prev.reopened ? "закривали сторінку" : "виходили зі сторінки"} на ${prev.awayS} с. Ось ті самі завдання з новими числами.</div>` : "";
+  const N = slotsOf(A, P);
   const head = t.twin ? `Аналогічна до задачі ${t.slot + 1} <span class="hint">(до ${pct(RULES.twin)} балу)</span>` : `Задача ${t.slot + 1} з ${N} · ${esc(T.title)}`;
   const nowMax = creditIfSolvedNow(t);
   $("app").innerHTML = `<div class="card">
     <details class="thd"><summary>📖 Теорія і приклади</summary><div class="th">${P.theory}<h3>Розв'язані приклади</h3>${P.examples}</div></details>
     ${progress()}
     <div class="tq" style="font-size:17px">${head}</div>
+    ${annNote}
     <div class="cond">${T.text(p)}</div>
     <div id="fields">${T.graph ? tableHtml(fields, t, done) : fields.map(f => fieldHtml(f, t, done)).join("")}</div>
     <div id="fbs">${feedbackHistory(t, T, p)}</div>
@@ -188,7 +197,9 @@ function renderTask(){
         <button class="sec" id="sol">${confirmSol ? "Точно показати? За задачу буде 0" : "Показати розв'язок"}</button>`}
     </div>
     <div id="aiBox"></div>
+    ${done ? "" : calcHtml()}
   </div>`;
+  bindCalc();
   if (T.graph) drawGraph(fields, t.vals || {});
   document.querySelectorAll("[data-in]").forEach(el => {
     el.addEventListener("input", () => { (t.vals ||= {})[el.dataset.in] = el.value; el.closest(".fld").classList.remove("bad"); if (T.graph) drawGraph(fields, t.vals); local.set(AID, A); });
@@ -216,6 +227,7 @@ function feedbackHistory(t, T, p){
       : `<div class="fb bad"><b>Неправильно${e.wrong && e.wrong.length > 1 ? ` (помилки в ${e.wrong.length} полях)` : ""}.</b> ${esc(e.msg || "Перевірте обчислення і одиниці.")}</div>`;
     if (e.type === "hint") return `<div class="fb hint"><b>Підказка ${e.lvl}:</b> ${e.lvl === 1 ? T.hint1(p) : T.hint2(p)}</div>`;
     if (e.type === "ai") return `<div class="fb ai"><b>Ви:</b> ${esc(e.q)}\n<b>ШІ:</b> ${esc(e.a)}</div>`;
+    if (e.type === "zero") return `<div class="fb bad"><b>Задачу не зараховано</b> (0 балів): ви знову виходили зі сторінки на ${e.s} с, а ліміт анулювань (${ANNUL_MAX}) вичерпано.</div>`;
     if (e.type === "sol") return `<div class="fb hint"><b>Розв'язок:</b> ${T.solution(p)}${t.twin ? "" : `<br>Далі буде <b>аналогічна задача</b> з іншими числами — розв'яжіть її самостійно.`}</div>`;
     return "";
   }).join("");
@@ -300,12 +312,14 @@ function renderConclusion(){
     const c = $("concl").value.trim();
     if (c.length < 40) { $("cErr").textContent = "Напишіть висновок хоча б у 2–3 реченнях."; return; }
     A.conclusion = c; A.done = true; A.finishedAt = new Date().toISOString();
-    A.result = gradeOf(A, P.tasks.length);
+    A.result = gradeOf(A, slotsOf(A, P));
     await save(); route();
   };
 }
 function verdict(t){
+  if (t.annulled) return `анульовано (вихід ${t.awayS} с)`;
   const s = taskStats(t);
+  if (s.zero) return "не зараховано (вихід зі сторінки)";
   if (s.sol) return "розв'язок показано";
   if (!s.ok) return "не розв'язано";
   const parts = [];
@@ -315,27 +329,90 @@ function verdict(t){
   return parts.length ? "розв'язано (" + parts.join(", ") + ")" : "з першої спроби";
 }
 function renderDone(){
-  const g = gradeOf(A, P.tasks.length);
+  const g = gradeOf(A, slotsOf(A, P));
   $("app").innerHTML = `<div class="card">
     <div class="hint">Практична робота №${P.num}</div><div class="tq">Роботу завершено</div>
     <p style="font-size:18px">Попередня оцінка: <b>${g.grade} з 12</b> <span class="hint">(${fmtN(g.points, 1)} бала)</span>. Остаточну оцінку виставляє викладач.</p>
     <table class="rep res"><tr><th>Задача</th><th>Результат</th><th>Бал</th></tr>
       ${A.tasks.map(t => { const T = P.tasks.find(x => x.key === t.key);
-        return `<tr><td>${t.twin ? "↳ аналогічна" : (t.slot + 1) + ". " + esc(T.title)}</td><td>${verdict(t)}</td><td>${pct(creditOf(t))}</td></tr>`; }).join("")}
+        return `<tr${t.annulled ? ' style="color:var(--mut)"' : ""}><td>${t.twin ? "↳ аналогічна" : (t.slot + 1) + ". " + esc(T.title)}</td><td>${verdict(t)}</td><td>${t.annulled ? "—" : pct(creditOf(t))}</td></tr>`; }).join("")}
     </table>
-    <p class="hint">Бал за кожну основну задачу разом з її аналогічною — до 100 %. Підсумок = 12 × (сума) / ${P.tasks.length}.</p>
+    <p class="hint">Бал за кожну основну задачу разом з її аналогічною — до 100 %. Підсумок = 12 × (сума) / ${slotsOf(A, P)}.</p>
     <details><summary>Ваш висновок</summary><p style="white-space:pre-wrap">${esc(A.conclusion)}</p></details></div>`;
 }
 
-// ---------- виходи зі сторінки (для викладача; на оцінку не впливають)
+// ---------- виходи зі сторінки: облік і анулювання задачі
+function taskOpen(){ if (!A || A.done || A.stage !== "tasks") return false; const t = cur(); if (!t) return false; const s = taskStats(t); return !(s.ok || s.sol || s.zero); }
 let hideAt = 0;
 document.addEventListener("visibilitychange", () => {
   if (!A || A.done || A.stage !== "tasks") return;
-  if (document.hidden) { A.meta.blur = (A.meta.blur || 0) + 1; hideAt = Date.now(); save(); }
-  else if (hideAt) {
-    const s = Math.round((Date.now() - hideAt) / 1000); hideAt = 0;
-    if (s >= 3) { const t = cur(); (A.meta.away ||= []).push({ task: t ? (t.twin ? t.slot + 1 + "а" : t.slot + 1) : "", s }); save(); }
+  if (document.hidden) {
+    A.meta.blur = (A.meta.blur || 0) + 1; hideAt = Date.now();
+    if (taskOpen()) A.meta.hiddenAt ||= hideAt;
+    save();
+  } else if (hideAt) {
+    const sec = Math.round((Date.now() - hideAt) / 1000); hideAt = 0; delete A.meta.hiddenAt;
+    if (sec >= 3) { const t = cur(); (A.meta.away ||= []).push({ task: t ? (t.twin ? t.slot + 1 + "а" : t.slot + 1) : "", s: sec }); }
+    if (sec >= AWAY_LIMIT && taskOpen()) annul(sec, false); else save();
   }
 });
+async function annul(sec, reopened){
+  if (PCFG.annul === false) { await save(); return; }
+  const t = cur();
+  const used = A.tasks.filter(x => x.annulled && !x.reopened).length;
+  if (!reopened && used >= ANNUL_MAX) {               // ліміт вичерпано — задача 0 балів
+    t.log.push({ type: "zero", s: sec, t: new Date().toISOString() });
+    await save(); renderTask(); return;
+  }
+  t.annulled = true; t.awayS = sec; if (reopened) t.reopened = true;
+  const vmax = Math.max(1, ...A.tasks.filter(x => x.slot === t.slot).map(x => x.variant || 0));
+  A.tasks.splice(A.cur + 1, 0, { key: t.key, slot: t.slot, variant: vmax + 1, twin: !!t.twin, max: t.max ?? 1, log: [] });
+  A.cur++; confirmSol = false;
+  await save(); renderTask(); window.scrollTo(0, 0);
+}
+
+// ---------- калькулятор (щоб не виходити зі сторінки)
+let calcOpen = false, lastField = null;
+function calcHtml(){
+  const keys = ["7","8","9","÷","(","4","5","6","×",")","1","2","3","−","⌫","0",",","C","+","="];
+  return `<details class="calc" ${calcOpen ? "open" : ""}><summary>🧮 Калькулятор</summary>
+    <input type="text" id="cDisp" inputmode="decimal" autocomplete="off" placeholder="напр. 760 − 1200 : 10">
+    <div class="cgrid">${keys.map(k => `<button type="button" class="${/[0-9,]/.test(k) ? "sec" : ""}" data-ck="${k}">${k}</button>`).join("")}</div>
+    <div class="btns" style="margin-top:6px"><span class="hint" id="cHint">Можна вводити й з клавіатури; «:» — ділення.</span><span class="sp"></span><button type="button" class="sm sec" id="cPut">→ у відповідь</button></div></details>`;
+}
+function bindCalc(){
+  const d = document.querySelector("details.calc"); if (!d) return;
+  d.addEventListener("toggle", () => calcOpen = d.open);
+  document.querySelectorAll("[data-in]").forEach(el => el.addEventListener("focus", () => lastField = el.dataset.in));
+  const disp = $("cDisp");
+  d.querySelectorAll("[data-ck]").forEach(b => b.onclick = () => {
+    const k = b.dataset.ck;
+    if (k === "C") disp.value = "";
+    else if (k === "⌫") disp.value = disp.value.slice(0, -1);
+    else if (k === "=") calcEval();
+    else disp.value += k;
+  });
+  disp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); calcEval(); } };
+  $("cPut").onclick = () => {
+    const v = disp.value.trim(); if (!/^-?\d+(,\d+)?$/.test(v)) { $("cHint").textContent = "Спершу обчисліть (=)."; return; }
+    const el = document.querySelector(`input[data-in="${lastField}"]`) || document.querySelector("input[data-in]");
+    if (!el) return; el.value = v; el.dispatchEvent(new Event("input")); el.focus();
+  };
+}
+function calcEval(){
+  const disp = $("cDisp");
+  try { const v = calc(disp.value); disp.value = fmtN(v, 4).replace(/\s/g, ""); $("cHint").textContent = "Готово."; }
+  catch(e){ $("cHint").textContent = "Не вдається обчислити — перевірте вираз."; }
+}
+// безпечний розбір виразу: числа, + − × ÷ : / * ( ), кома як десятковий роздільник
+function calc(str){
+  const s = String(str).replace(/\s+/g, "").replace(/,/g, ".").replace(/[×*]/g, "*").replace(/[÷:/]/g, "/").replace(/[−–]/g, "-");
+  let i = 0;
+  const num = () => { const m = s.slice(i).match(/^\d+(\.\d+)?/); if (!m) throw 0; i += m[0].length; return Number(m[0]); };
+  const factor = () => { if (s[i] === "-") { i++; return -factor(); } if (s[i] === "(") { i++; const v = expr(); if (s[i++] !== ")") throw 0; return v; } return num(); };
+  const term = () => { let v = factor(); while (s[i] === "*" || s[i] === "/") { const o = s[i++]; const r = factor(); v = o === "*" ? v * r : v / r; } return v; };
+  const expr = () => { let v = term(); while (s[i] === "+" || s[i] === "-") { const o = s[i++]; const r = term(); v = o === "+" ? v + r : v - r; } return v; };
+  const v = expr(); if (i !== s.length || !Number.isFinite(v)) throw 0; return v;
+}
 
 start();

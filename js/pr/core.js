@@ -81,6 +81,12 @@ export function summaryOf(att){
   };
 }
 
+// Набір задач для нових спроб. Практичну можна оновлювати: старі шаблони лишаються в tasks
+// (щоб старі спроби показувалися з тими самими числами), а нові спроби беруть задачі з set.
+export const setOf = P => P.set ? P.set.map(k => P.tasks.find(t => t.key === k)) : P.tasks;
+// Скільки основних задач було в цій спробі (для старих спроб — за їхнім набором, не за поточним)
+export const slotsOf = (att, P) => new Set((att.tasks || []).filter(t => !t.twin).map(t => t.slot)).size || setOf(P).length;
+
 // задачі студента: з модуля практичної і зерна
 export function buildTask(P, key, seed, variant = 0){
   const T = P.tasks.find(x => x.key === key);

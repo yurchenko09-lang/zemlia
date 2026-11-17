@@ -2,7 +2,7 @@
 // Оцінка тут перераховується з журналу дій студента (pr/core.js), а не береться з того, що надіслав браузер.
 import * as st from "./store.js";
 import { PRACTICALS, loadPractical } from "./pr/index.js";
-import { buildTask, creditOf, gradeOf, summaryOf, taskStats, fmtN, RULES } from "./pr/core.js";
+import { buildTask, creditOf, gradeOf, summaryOf, taskStats, fmtN, RULES, setOf, slotsOf } from "./pr/core.js";
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -40,7 +40,7 @@ function render(){
       <div class="row"><h3 style="margin:0">№${p.num}. ${esc(p.title)}</h3><span class="sp"></span>
         <span class="pill ${c.open ? "st-ok" : "st-off"}">${c.open ? "відкрита" : "закрита"}</span></div>
       <div style="margin:10px 0 4px"><b>Групи:</b> ${SETTINGS.groups.map(g => `<label class="chk"><input type="checkbox" class="g" value="${esc(g)}" ${(c.groups||[]).includes(g) ? "checked" : ""}> ${esc(g)}</label>`).join("") || '<span class="hint">груп немає — додайте їх в основному кабінеті</span>'}</div>
-      <label class="chk"><input type="checkbox" class="ai" ${c.ai !== false ? "checked" : ""}> ШІ-помічник (пояснює хід розв'язання; кожне запитання −10 % балу за задачу)</label>
+      <label class="chk"><input type="checkbox" class="ai" ${c.ai !== false ? "checked" : ""}> ШІ-помічник (пояснює хід розв'язання; кожне запитання −${pct(RULES.ai)} балу за задачу)</label>
       <label class="chk"><input type="checkbox" class="an" ${c.annul !== false ? "checked" : ""}> Анулювати задачу при виході зі сторінки понад 5 с (нові числа; після 2 анулювань — 0 балів). На сторінці є калькулятор.</label>
       <div class="row" style="margin-top:10px">
         <button data-act="toggle" data-p="${p.id}">${c.open ? "Закрити" : "Відкрити для студентів"}</button>
@@ -91,7 +91,7 @@ function statusOf(r, P){
   if (!r) return `<span class="pill st-off">не розпочинав</span>`;
   if (r.done) return `<span class="pill st-ok">завершено</span>`;
   const solved = (r.tasks || []).filter(t => !t.twin && !t.annulled && (taskStats(t).ok || taskStats(t).sol || taskStats(t).zero)).length;
-  return `<span class="pill st-warn">${r.stage === "theory" ? "читає теорію" : r.stage === "conclusion" ? "пише висновок" : `задачі ${solved}/${P.tasks.length}`}</span>`;
+  return `<span class="pill st-warn">${r.stage === "theory" ? "читає теорію" : r.stage === "conclusion" ? "пише висновок" : `задачі ${solved}/${slotsOf(r, P)}`}</span>`;
 }
 function rowsFor(P){
   const c = cfgOf(SEL), groups = GRP ? [GRP] : (c.groups && c.groups.length ? c.groups : SETTINGS.groups);
@@ -108,12 +108,12 @@ function paintResults(){
       <select id="prSel" style="width:auto;max-width:100%">${PRACTICALS.map(p => `<option value="${p.id}" ${p.id === SEL ? "selected" : ""}>№${p.num}. ${esc(p.title)}</option>`).join("")}</select>
       <select id="grpSel" style="width:auto"><option value="">Усі групи</option>${groups.map(g => `<option ${g === GRP ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>
       <button class="sec sm" data-act="sel" data-v="${SEL}">Оновити</button><button class="sec sm" data-act="csv">CSV</button></div>
-    <p class="hint">Оцінка = 12 × (сума балів за задачі) / ${P.tasks.length}. Бал за задачу: з першої спроби — 100 %; −${pct(RULES.wrong)} за кожну помилку (перші 3), −${pct(RULES.hint1)} і −${pct(RULES.hint2)} за підказки, −${pct(RULES.ai)} за запитання ШІ; не менше ${pct(RULES.floor)}, якщо розв'язано самостійно; показаний розв'язок — 0, аналогічна задача — до ${pct(RULES.twin)}.</p>
+    <p class="hint">Оцінка = 12 × (сума балів за задачі) / кількість задач (зараз ${setOf(P).length}). Бал за задачу: з першої спроби — 100 %; −${pct(RULES.wrong)} за кожну помилку (перші 3), −${pct(RULES.hint1)} і −${pct(RULES.hint2)} за підказки, −${pct(RULES.ai)} за запитання ШІ; не менше ${pct(RULES.floor)}, якщо розв'язано самостійно; показаний розв'язок — 0, аналогічна задача — до ${pct(RULES.twin)}.</p>
     <div style="overflow-x:auto"><table class="rep"><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Оцінка</th><th title="Розв'язано самостійно з першої спроби, без підказок">З 1-ї спроби</th><th>Помилок</th><th>Підказок</th><th>ШІ</th><th title="Скільки разів студент відкрив розв'язок">Розв'язків</th><th title="Виходи зі сторінки під час задач · анульовані задачі · задачі з 0 балів через вихід">Вкладки</th><th>Тривалість</th></tr>
     ${list.map(({ r, group, name }) => { if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td>${statusOf(null, P)}</td><td colspan="8"></td></tr>`;
-      const g = gradeOf(r, P.tasks.length), s = summaryOf(r);
+      const g = gradeOf(r, slotsOf(r, P)), s = summaryOf(r);
       return `<tr class="clk" data-id="${esc(r.id)}"><td>${esc(r.name)}</td><td>${esc(r.group)}</td><td>${statusOf(r, P)}</td>
-        <td><b>${r.done ? g.grade : "—"}</b>${r.done ? ` <span class="hint">(${fmtN(g.points, 1)})</span>` : ""}</td><td>${s.firstTry} / ${P.tasks.length}</td><td>${s.wrong}</td><td>${s.hints}</td><td>${s.ai}</td><td>${s.sol}</td>
+        <td><b>${r.done ? g.grade : "—"}</b>${r.done ? ` <span class="hint">(${fmtN(g.points, 1)})</span>` : ""}</td><td>${s.firstTry} / ${slotsOf(r, P)}</td><td>${s.wrong}</td><td>${s.hints}</td><td>${s.ai}</td><td>${s.sol}</td>
         <td>${(r.meta && r.meta.blur) || 0}${s.annulled || s.zero ? ` <span class="hint">ан. ${s.annulled}${s.zero ? ` · 0 б.: ${s.zero}` : ""}</span>` : ""}</td><td>${fmt(duration(r))}</td></tr>`; }).join("")}
     </table></div>
     <div id="proto">${list.filter(x => x.r).map(x => protoHtml(x.r, P)).join("")}</div>`;
@@ -129,7 +129,7 @@ function logLine(e, T, p, fields){
   return "";
 }
 function protoHtml(r, P){
-  const g = gradeOf(r, P.tasks.length);
+  const g = gradeOf(r, slotsOf(r, P));
   return `<details class="proto" id="pr_${esc(r.id)}"><summary><b>${esc(r.name)}</b> · ${esc(r.group)} · ${r.done ? `оцінка <b>${g.grade}</b> (${fmtN(g.points, 1)})` : "не завершено"}</summary>
     <p class="hint">Почав: ${r.meta && r.meta.startedAt ? new Date(r.meta.startedAt).toLocaleString("uk-UA") : "—"} · Тривалість: ${fmt(duration(r))} · Виходи зі сторінки: ${(r.meta && r.meta.blur) || 0}${(r.meta && r.meta.away || []).length ? " (" + r.meta.away.map(a => `задача ${a.task} — ${a.s} с`).join(", ") + ")" : ""}</p>
     ${(r.tasks || []).map(t => { const { T, p, fields } = buildTask(P, t.key, r.seed, t.variant);
@@ -144,7 +144,7 @@ function csv(){
   const P = MOD[SEL]; const list = rowsFor(P);
   const head = ["Студент","Група","Стан","Оцінка","Бали","З 1-ї спроби","Помилок","Підказок","Запитань ШІ","Розв'язків показано","Виходи зі сторінки","Анульовано задач","0 балів через вихід","Тривалість, хв"];
   const rows = list.map(({ r, group, name }) => { if (!r) return [name, group, "не розпочинав"];
-    const g = gradeOf(r, P.tasks.length), s = summaryOf(r);
+    const g = gradeOf(r, slotsOf(r, P)), s = summaryOf(r);
     return [r.name, r.group, r.done ? "завершено" : "в процесі", r.done ? g.grade : "", String(g.points).replace(".", ","), s.firstTry, s.wrong, s.hints, s.ai, s.sol, (r.meta && r.meta.blur) || 0, s.annulled, s.zero, Math.round(duration(r) / 60)]; });
   const text = "﻿" + [head, ...rows].map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" })); a.download = `практична_${MOD[SEL].num}.csv`; a.click();
