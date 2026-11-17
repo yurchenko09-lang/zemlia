@@ -271,10 +271,14 @@ function markCopied(text, o){
   return out + esc(text.slice(pos));
 }
 async function verify(r){
-  if (!r.messages || r.messages.length < 2 || !r.sig) { VER[r.id] = "none"; return; }
+  // Підпис ставить сервер разом з відповіддю ШІ. Повідомлення студента, на яке ШІ ще не відповів
+  // (зв'язок обірвався, вкладку закрили, ШІ саме друкує), підписом не покрите — перевіряємо без нього.
+  const msgs = (r.messages || []).slice();
+  while (msgs.length && msgs[msgs.length-1].role === "user") msgs.pop();
+  if (msgs.length < 2 || !r.sig) { VER[r.id] = "none"; return; }
   try {
     const res = await fetch(WORKER_URL.replace(/\/$/,"") + "/verify", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: r.messages, sig: r.sig, eval: r.done ? (r.eval ?? null) : null }) }).then(x => x.json());
+      body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: msgs, sig: r.sig, eval: r.done ? (r.eval ?? null) : null }) }).then(x => x.json());
     VER[r.id] = res.ok ? "ok" : "bad";
   } catch(e){ VER[r.id] = "err"; }
   if (TAB === "results") paintVer(r.id);
