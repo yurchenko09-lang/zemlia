@@ -159,11 +159,13 @@ function cleanPart(x){
 }
 const normName = n => st.attemptId("", "", n);   // та сама нормалізація, що й для ідентифікатора спроби
 function mapGroup(code){
-  const G = SETTINGS.groups;
+  const G = SETTINGS.groups, k = x => String(x).toLowerCase().replace(/[\s\-–—_.]/g, "");
   if (G.includes(code)) return { name: code, how: "exists" };
-  const hits = G.filter(g => (g.match(/[0-9]+[-\s]?[a-zа-яіїєґ]*/gi) || []).map(t => t.replace(/[-\s]/g,"").toLowerCase()).includes(code.replace(/[-\s]/g,"").toLowerCase()));
+  let hits = G.filter(g => k(g) === k(code));                       // «101-О» = «101 О» = «101о»
+  if (!hits.length && /^\d+$/.test(code.trim()))                     // «101» → «101-О», «Група 101»
+    hits = G.filter(g => (g.match(/\d+/g) || []).includes(code.trim()));
   if (hits.length === 1) return { name: hits[0], how: "mapped" };
-  return { name: code, how: "new" };
+  return { name: code, how: hits.length > 1 ? "ambiguous" : "new" };
 }
 function parseRoster(text){
   const groups = {}, problems = [];
@@ -226,7 +228,7 @@ function rosterCheck(){
   $("rosterPrev").innerHTML = `<h4>Перевірка</h4>
     ${problems.length ? `<div class="alert show">${problems.map(esc).join("<br>")}</div>` : ""}
     <table class="rep"><tr><th>Група</th><th>Студентів</th><th>Зміни</th><th>Зауваження</th></tr>
-    ${groups.map(g => `<tr><td><b>${esc(g.group)}</b><br><span class="hint">${g.how==="new" ? "нова група — буде додана" : g.how==="mapped" ? `«${esc(g.code)}» → наявна група` : "наявна група"}</span></td>
+    ${groups.map(g => `<tr><td><b>${esc(g.group)}</b><br><span class="hint">${g.how==="new" ? "нова група — буде додана" : g.how==="ambiguous" ? '<span class="bad">кілька груп з таким номером — перейменуйте в таблиці на точну назву</span>' : g.how==="mapped" ? `«${esc(g.code)}» → наявна група` : "наявна група"}</span></td>
       <td>${g.names.length}</td>
       <td>${!ROSTER[g.group] ? '<span class="hint">новий список</span>' : (g.added.length || g.removed.length) ?
         `${g.added.length ? `<span class="ok">+ ${g.added.map(esc).join(", ")}</span><br>` : ""}${g.removed.length ? `<span class="bad">− ${g.removed.map(esc).join(", ")}</span>` : ""}` : '<span class="hint">без змін</span>'}</td>
