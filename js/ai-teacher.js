@@ -337,7 +337,7 @@ function attemptState(r){
   const e = r.eval || evalFromText(r);
   if (VER[r.id] === "bad") return { label: "⚠ протокол змінено", cls: "st-bad", order: 0 };
   if (r.done && e && e.error) return { label: "завершено, оцінку не сформовано", cls: "st-bad", order: 1 };
-  if (r.done) return { label: "завершено", cls: "st-ok", order: 4 };
+  if (r.done) return { label: r.closedByTeacher ? "завершено викладачем" : "завершено", cls: "st-ok", order: 4 };
   if (e) return { label: "обірвано (стара версія)", cls: "st-bad", order: 1 };
   const k = asked(r), n = nqOf(r), idle = (Date.now() - new Date(r.updatedAt || 0)) / 60000;
   return { label: !k ? "увійшов, питань ще не було" : `в процесі · питання ${k} з ${n}` + (idle > 30 ? " · без активності " + Math.round(idle) + " хв" : ""), cls: "st-warn", order: 2 };
@@ -379,7 +379,7 @@ function renderResults(){
         <td data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</td></tr>`; }).join("")}
       </tbody></table></div>` : '<p class="hint" style="margin-top:12px">Ще ніхто не проходив цю співбесіду, а списків груп немає.</p>') : `<p class="hint" style="margin-top:12px">Оберіть співбесіду.</p>`}
   </div>
-  ${att.length ? `<div class="card"><div class="row"><h3 style="margin:0">Протоколи (${att.length})</h3><span class="sp"></span><button class="sm sec" data-act="regradeAll">Переоцінити всіх завершених</button><button class="sm sec" data-act="expandAll">Розгорнути всі</button><button class="sm sec" data-act="collapseAll">Згорнути всі</button></div>
+  ${att.length ? `<div class="card"><div class="row"><h3 style="margin:0">Протоколи (${att.length})</h3><span class="sp"></span><button class="sm sec" data-act="closeAll">Завершити й оцінити незакінчені</button><button class="sm sec" data-act="regradeAll">Переоцінити всіх завершених</button><button class="sm sec" data-act="expandAll">Розгорнути всі</button><button class="sm sec" data-act="collapseAll">Згорнути всі</button></div>
     ${rows.filter(x => x.r).map(({ r }) => { const s0 = attemptState(r), e = r.eval || evalFromText(r);
       return `<details class="proto" id="p-${esc(r.id)}" ${COLLAPSED.has(r.id) ? "" : "open"} data-pid="${esc(r.id)}"><summary><b>${esc(r.name)}</b> · ${esc(r.group)} <span class="pill ${s0.cls}">${esc(s0.label)}</span>${e && e.max ? ` <b>${e.total} / ${e.max}</b>` : ""}</summary>${detailHtml(r)}</details>`; }).join("")}</div>` : ""}`;
   $("selT").onchange = async e => { SEL = { topic: e.target.value, group: "", id: "" }; await loadRows(); render(); };
@@ -480,6 +480,7 @@ function detailHtml(r){
         : `<div class="msg ai">${esc(m.content.split(/<eval>/i)[0].trim() || "(оцінка — вище)")}</div>${awayLine(mi)}`).join("")}
     <div class="row" style="margin-top:12px"><span class="sp"></span>
       ${!r.done && r.uid ? `<button class="sm sec" data-act="unbind" data-v="${esc(r.id)}">Дозволити продовжити з іншого пристрою</button>` : ""}
+      ${!r.done && r.sig && asked(r) ? `<button class="sm" data-act="close" data-v="${esc(r.id)}">Завершити й оцінити зараз</button>` : ""}
       ${r.done && r.sig ? `<button class="sm sec" data-act="regrade" data-v="${esc(r.id)}">Переоцінити за поточними правилами</button>` : ""}
       <button class="sm sec" data-act="del" data-v="${esc(r.id)}">Дозволити пройти заново</button></div>
   </div>`;
@@ -494,6 +495,22 @@ async function regradeOne(r){
   const prev = r.evalPrev || r.eval || null;
   await st.updateAttempt(r.id, { eval: d.eval, score: d.eval.total, sig: d.sig, evalPrev: prev, regradedAt: new Date().toISOString() });
   return { from: r.eval ? r.eval.total : null, to: d.eval.total, max: d.eval.max };
+}
+const IDLE_CLOSE = 20;   // хв без активності, після яких «Завершити й оцінити незакінчені» вважає співбесіду покинутою
+// завершити незакінчену співбесіду (студент пішов, обірвався зв'язок, помилка ШІ) і оцінити за наявними відповідями
+async function closeOne(r){
+  const msgs = (r.messages || []).slice(), tail = [];
+  while (msgs.length && msgs[msgs.length-1].role === "user") tail.unshift(msgs.pop().content);   // відповідь без реакції ШІ
+  const res = await fetch(WORKER_URL.replace(/\/$/,"") + "/regrade", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject: AI_SUBJECT, topic: r.t, sid: r.id, seed: (r.meta && r.meta.seed) || "", messages: msgs, sig: r.sig, eval: null,
+      close: true, tail: tail.join("\n\n"),
+      stats: { blur: (r.meta && r.meta.blur) || 0, away: (r.meta && r.meta.away) || [], secs: (r.meta && r.meta.secs) || [] } }) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || ("Помилка " + res.status));
+  if (!Array.isArray(d.messages)) throw new Error("Оновіть воркер — він ще не вміє завершувати співбесіди");
+  await st.updateAttempt(r.id, { messages: d.messages, done: true, eval: d.eval, score: d.eval.total, sig: d.sig,
+    closedByTeacher: new Date().toISOString(), "meta.finishedAt": new Date().toISOString() });
+  return d.eval;
 }
 // оцінка, що потрапила в текст повідомлення ШІ (обрізана чи без тега) → об'єкт для показу
 function evalFromText(r){
@@ -558,6 +575,25 @@ document.addEventListener("click", async ev => {
     else if (act === "regrade") {
       const r = ROWS.find(x => x.id === v); el.disabled = true; el.textContent = "Переоцінюю…";
       const x = await regradeOne(r); warn(`${esc(r.name)}: ${x.from ?? "—"} → <b>${x.to}</b> / ${x.max}`); SEL.id = v; await loadRows(); render();
+    }
+    else if (act === "close") {
+      const r = ROWS.find(x => x.id === v);
+      if (!confirm(`Завершити співбесіду студента ${r.name} і оцінити за наявними відповідями (${asked(r)} з ${nqOf(r)} питань)? Продовжити її студент уже не зможе.`)) return;
+      el.disabled = true; el.textContent = "Оцінюю…";
+      try { const ev = await closeOne(r); warn(`${esc(r.name)}: завершено, оцінка <b>${ev.total}</b> / ${ev.max}`); }
+      catch(e){ warn("Не вдалося: " + esc(e.message)); }
+      SEL.id = v; await loadRows(); render();
+    }
+    else if (act === "closeAll") {
+      // лише ті, хто вже не працює: без активності щонайменше IDLE_CLOSE хв (щоб не обірвати тих, хто саме відповідає)
+      const idle = r => (Date.now() - new Date(r.updatedAt || 0)) / 60000;
+      const cand = ROWS.filter(r => !r.done && r.sig && asked(r) && (!SEL.group || r.group === SEL.group));
+      const list = cand.filter(r => idle(r) >= IDLE_CLOSE), busyN = cand.length - list.length;
+      if (!list.length) { warn(busyN ? `Незакінчених без активності немає. ${busyN} студ. ще працюють (активність за останні ${IDLE_CLOSE} хв) — їх не чіпаємо.` : "Незакінчених співбесід немає."); return; }
+      if (!confirm(`Завершити й оцінити ${list.length} незакінчених співбесід за наявними відповідями?\n\n${list.map(r => `• ${r.name} (${r.group}) — ${asked(r)} з ${nqOf(r)} питань, без активності ${Math.round(idle(r))} хв`).join("\n")}${busyN ? `\n\nЩе ${busyN} студ. зараз працюють — їх не завершуємо.` : ""}\n\nПродовжити ці співбесіди студенти вже не зможуть.`)) return;
+      el.disabled = true; let ok = 0, fail = 0;
+      for (const r of list) { el.textContent = `Оцінюю ${ok + fail + 1} з ${list.length}…`; try { await closeOne(r); ok++; } catch(e){ fail++; if (/Оновіть воркер/.test(e.message)) { warn(esc(e.message)); break; } } }
+      warn(`Завершено й оцінено: ${ok}${fail ? `, з помилкою: ${fail} (спробуйте ще раз)` : ""}.`); await loadRows(); render();
     }
     else if (act === "regradeAll") {
       const list = ROWS.filter(r => r.done && r.sig && (!SEL.group || r.group === SEL.group));
