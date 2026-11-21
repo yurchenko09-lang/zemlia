@@ -370,13 +370,13 @@ function renderResults(){
     <div class="row"><select id="selT" style="width:auto;flex:1;min-width:240px"><option value="">— співбесіда —</option>${list.map(([id,c])=>`<option value="${id}" ${SEL.topic===id?'selected':''}>${esc(c.title||"без назви")}</option>`).join("")}</select>
       <select id="selG" style="width:auto"><option value="">Усі групи</option>${groups.map(g=>`<option ${SEL.group===g?'selected':''}>${esc(g)}</option>`).join("")}</select>
       <button class="sec sm" data-act="reload">Оновити</button><button class="sec sm" data-act="csv" ${att.length?'':'disabled'}>CSV</button><button class="sec sm" data-act="json" ${att.length?'':'disabled'}>JSON (протоколи)</button></div>
-    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th title="Найвищий рівень, на якому студент упевнено відповідав сам · кількість спрощень">Рівень · спрощень</th><th>Підозра ШІ</th><th title="Дослівний збіг відповідей з текстом лекції">Збіг з лекцією</th><th title="Виходи зі сторінки за співбесіду (жовтим — ${TABS_WARN} і більше) · анульовані питання">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th title="Найбільша швидкість набору довгої відповіді, символів за секунду, разом із читанням питання (жовтим — понад ${FAST})">Швидкість, симв./с</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th></tr></thead><tbody>
-      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="10"></td></tr>`;
+    ${SEL.topic ? `<div style="margin-top:12px">${sum}</div>` + (rows.length ? `<style>table.res td,table.res th{padding:7px 5px}</style><div style="overflow-x:auto;margin-top:8px"><table class="rep res"><thead><tr><th>Студент</th><th>Група</th><th>Стан</th><th>Бал ШІ</th><th title="Найвищий рівень, на якому студент упевнено відповідав сам · кількість спрощень">Рівень · спрощень</th><th>Підозра ШІ</th><th title="Дослівний збіг відповідей з текстом лекції">Збіг з лекцією</th><th title="Виходи зі сторінки за співбесіду (жовтим — ${TABS_WARN} і більше) · анульовані питання">Вкладки</th><th title="Спроби вставити текст">Вставки</th><th title="Найбільша швидкість набору довгої відповіді, символів за секунду, разом із читанням питання (жовтим — понад ${FAST})">Швидкість, симв./с</th><th>Сер. час відповіді</th><th>Тривалість</th><th title="Цілісність протоколу">Протокол</th><th>Дії</th></tr></thead><tbody>
+      ${rows.map(({ r, group, name }) => { const s0 = attemptState(r); if (!r) return `<tr class="none"><td>${esc(name)}</td><td>${esc(group)}</td><td><span class="pill st-off">не розпочинав</span></td><td colspan="11"></td></tr>`;
         const e = r.eval || evalFromText(r) || {}; return `<tr class="clk" data-act="open" data-v="${esc(r.id)}">
         <td>${esc(r.name)}</td><td>${esc(r.group)}</td><td><span class="pill ${s0.cls}">${esc(s0.label)}</span></td>
         <td>${e.max ? `<b>${e.total}</b> / ${e.max}` : "—"}</td><td>${lvl(e)}</td><td>${e.ai_suspect ? suspect(e.ai_suspect) : "—"}</td><td>${ovlSummary(r.id)}</td>
         <td>${tabsCell(r)}</td><td>${(r.meta&&r.meta.pastes)||0}</td><td>${speedCell(r)}</td><td>${fmt(avgSecs(r))}</td><td>${fmt(duration(r))}</td>
-        <td data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</td></tr>`; }).join("")}
+        <td data-ver="${esc(r.id)}">${verLabel(VER[r.id])}</td><td class="acts" style="min-width:80px">${rowActs(r)}</td></tr>`; }).join("")}
       </tbody></table></div>` : '<p class="hint" style="margin-top:12px">Ще ніхто не проходив цю співбесіду, а списків груп немає.</p>') : `<p class="hint" style="margin-top:12px">Оберіть співбесіду.</p>`}
   </div>
   ${att.length ? `<div class="card"><div class="row"><h3 style="margin:0">Протоколи (${att.length})</h3><span class="sp"></span><button class="sm sec" data-act="closeAll">Завершити й оцінити незакінчені</button><button class="sm sec" data-act="regradeAll">Переоцінити всіх завершених</button><button class="sm sec" data-act="expandAll">Розгорнути всі</button><button class="sm sec" data-act="collapseAll">Згорнути всі</button></div>
@@ -388,6 +388,15 @@ function renderResults(){
   if (SEL.id) { const d = document.getElementById("p-" + SEL.id); if (d) { d.open = true; COLLAPSED.delete(SEL.id); d.scrollIntoView({ behavior: "smooth", block: "start" }); } SEL.id = ""; }
 }
 let COLLAPSED = new Set(), ROSTER = {};
+// кнопки дій прямо в рядку таблиці (data-stay — після дії лишаємося в таблиці, а не гортаємо до протоколу)
+function rowActs(r){
+  const b = (act, label, title) => `<button class="sm sec" data-act="${act}" data-v="${esc(r.id)}" data-stay="1" title="${title}" style="display:block;width:100%;margin:0 0 4px;padding:3px 6px;font-size:12px">${label}</button>`;
+  return [
+    !r.done && r.sig && asked(r) ? b("close", "Оцінити", "Завершити співбесіду й оцінити за наявними відповідями") : "",
+    r.done && r.sig ? b("regrade", "Переоцінити", "Переоцінити за поточними правилами") : "",
+    b("del", "Заново", "Видалити спробу — студент зможе пройти співбесіду заново")
+  ].join("");
+}
 // ---------- результати підготовки: по студенту — кількість тренувань і сума за всі
 function renderTrainResults(){
   const list = interviews(), cfg = SAVED[SEL.topic] || {};
@@ -411,7 +420,7 @@ function renderTrainResults(){
       <button class="sec sm" data-act="reload">Оновити</button><button class="sec sm" data-act="csvTrain" ${att.length?'':'disabled'}>CSV</button><button class="sec sm" data-act="json" ${att.length?'':'disabled'}>JSON (протоколи)</button></div>
     <p class="hint" style="margin:10px 0 4px">Підготовка без оцінки. «Самостійно» — частка завдань, на які студент відповів правильно з першої спроби, за всі тренування.</p>
     <div>${gsum}</div>
-    ${studs.length ? `<div style="overflow-x:auto;margin-top:8px"><table class="rep"><thead><tr><th>Студент</th><th>Група</th><th>Тренувань</th><th>Завдань</th><th>Самостійно</th><th>З підказкою</th><th>Показано відповідь</th><th>Повторити (останнє тренування)</th><th>Останнє</th></tr></thead><tbody>
+    ${studs.length ? `<style>table.res td,table.res th{padding:7px 5px}</style><div style="overflow-x:auto;margin-top:8px"><table class="rep res"><thead><tr><th>Студент</th><th>Група</th><th>Тренувань</th><th>Завдань</th><th>Самостійно</th><th>З підказкою</th><th>Показано відповідь</th><th>Повторити (останнє тренування)</th><th>Останнє</th></tr></thead><tbody>
       ${studs.map(x => { if (!x.att.length) return `<tr class="none"><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td><span class="pill st-off">не тренувався</span></td><td colspan="6"></td></tr>`;
         const t = sumOf(x.att), last = [...x.att].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))[0], le = last.eval || {};
         return `<tr class="clk" data-act="open" data-v="${esc(last.id)}"><td>${esc(x.name)}</td><td>${esc(x.group)}</td>
@@ -574,7 +583,7 @@ document.addEventListener("click", async ev => {
     else if (act === "open") { SEL.id = v; render(); }
     else if (act === "regrade") {
       const r = ROWS.find(x => x.id === v); el.disabled = true; el.textContent = "Переоцінюю…";
-      const x = await regradeOne(r); warn(`${esc(r.name)}: ${x.from ?? "—"} → <b>${x.to}</b> / ${x.max}`); SEL.id = v; await loadRows(); render();
+      const x = await regradeOne(r); warn(`${esc(r.name)}: ${x.from ?? "—"} → <b>${x.to}</b> / ${x.max}`); SEL.id = el.dataset.stay ? "" : v; await loadRows(); render();
     }
     else if (act === "close") {
       const r = ROWS.find(x => x.id === v);
@@ -582,7 +591,7 @@ document.addEventListener("click", async ev => {
       el.disabled = true; el.textContent = "Оцінюю…";
       try { const ev = await closeOne(r); warn(`${esc(r.name)}: завершено, оцінка <b>${ev.total}</b> / ${ev.max}`); }
       catch(e){ warn("Не вдалося: " + esc(e.message)); }
-      SEL.id = v; await loadRows(); render();
+      SEL.id = el.dataset.stay ? "" : v; await loadRows(); render();
     }
     else if (act === "closeAll") {
       // лише ті, хто вже не працює: без активності щонайменше IDLE_CLOSE хв (щоб не обірвати тих, хто саме відповідає)
